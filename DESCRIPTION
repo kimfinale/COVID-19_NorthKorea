@@ -1,11 +1,14 @@
 Package: COVID19NorthKorea
 Type: Package
-Title: What the Package Does (Title Case)
+Title: Data and modeling of COVID-19 in North Korea
 Version: 0.1.0
-Author: Who wrote it
-Maintainer: The package maintainer <yourself@somewhere.net>
+Date: 2023-01-31
+Author: Jong-Hoon Kim
+Maintainer: Jong-Hoon Kim <jonghoon.kim@ivi.int>
 Description: More about what it does (maybe more than one line)
     Use four spaces when indenting paragraphs within the Description.
-License: What license is it under?
 Encoding: UTF-8
 LazyData: true
+License: GPL (>= 2)
+Imports: Rcpp (>= 1.0.9)
+LinkingTo: Rcpp

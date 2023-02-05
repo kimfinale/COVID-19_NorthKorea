@@ -1,0 +1,547 @@
+---
+title: ""
+output:
+  html_document:
+    df_print: paged
+  html_notebook:
+    highlight: zenburn
+editor_options:
+  chunk_output_type: console
+---
+
+
+```{r  global_options}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
+```
+
+### COVID-19 in North Korea
+
+```{r  results='hide'}
+library(readxl)
+library(ggplot2)
+
+dat <- read_xlsx("data/covid19_daily.xlsx")
+names(dat) <- c("date", "symptomatic", "recovered", "deaths", "cumul_symptomatic", "cumul_recovered", "cumul_isolated", "cumul_deaths")
+dat <- dat[3:(nrow(dat)-1),]
+library(dplyr)
+dat %>% 
+  mutate(across(2:8, as.integer),
+         newdate = seq(from=as.Date("2022-05-13"), 
+                       to=as.Date("2022-08-10"), by="day"), 
+         cfr = cumul_deaths / cumul_symptomatic) -> dat
+
+# d <- dat[,"newdate", ]
+# sum((dat$cumul_symptomatic - dat$cumul_recovered - dat$cumul_isolated) != 0)
+# tstamp <- format(Sys.time(), "%Y%m%d")
+# saveRDS(dat, paste0("outputs/NorthKorea_dat_", tstamp, ".rds"))
+```
+
+- 신규 유열자 (new symptomatic cases) were first repoorted on `r format(dat$newdate[1], "%B %d, %Y")` ($n$ = `r dat$symptomatic[1]`).
+- There were, however, `r dat$cumul_symptomatic[1]` symptomatic cases already on `r format(dat$newdate[1], "%B %d, %Y")`.
+- In total, `r dat$cumul_symptomatic[nrow(dat)]` cases were reported `r format(dat$newdate[1], "%B %d, %Y")` through `r format(dat$newdate[nrow(dat)], "%B %d, %Y")`
+- Case fatality ratio was very low: CFR = `r format(round(dat$cfr[nrow(dat)], digits=8), scientific=FALSE)`
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+library(tidyr)
+
+dat %>%  select(newdate, symptomatic, cumul_symptomatic) %>%
+  pivot_longer(cols=c(2,3), names_to = "daily_cumul") -> d
+
+plt <- ggplot(d, aes(newdate, value))+
+  geom_line()+
+  geom_point()+
+  labs(x="", y="")+
+  ggtitle("Symptomatic cases")+
+  facet_wrap(~daily_cumul, nrow=2, scales="free_y")
+
+plt
+# Alene, Muluneh, Leltework Yismaw, Moges Agazhe Assemie, Daniel Bekele Ketema, Wodaje Gietaneh, and Tilahun Yemanu Birhan. “Serial Interval and Incubation Period of COVID-19: A Systematic Review and Meta-Analysis.” BMC Infectious Diseases 21, no. 1 (December 2021): 1–9. https://doi.org/10.1186/s12879-021-05950-x.
+
+#Abstract: ... mean serial interval of COVID-19 was 5.2 (95%CI: 4.9–5.5) days
+SI <- 5.2
+SI_std <- (5.5-5.2)/1.96
+```
+
+### $R_t$ analysis
+
+- EpiEstim package
+- 신규 유열자 was used as daily incidence
+- Serial interval was was assumed to be `r SI`.
+- $R_t$ decreased over time and almost never reached 1
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+library(EpiEstim)
+res <- estimate_R(dat$symptomatic, 
+                  method="parametric_si",
+                  config=make_config(list(mean_si=SI, std_si=SI_std)))
+
+plot(res)
+```
+
+
+### Particle filter  - North Korea data
+Particle filtering - particle_filter
+Expect errors since backward sampling is not in place
+North Korea data
+```{r}
+library(pfilterCOVID)
+set.seed(1)
+theme_set(theme_bw())
+tstamp <- "20220105"
+I0 <- 100
+# data from the pfilterCOVID package
+pdat <- readRDS(paste0("outputs/Rt_dataset_I0=", I0, "_", tstamp, ".rds"))
+# # determine the data type to model (infection vs. confirmation)
+# dtype <- "confirmation"
+# d <- dat$ode[, c("time", "daily_infected")]
+# if (dtype == "confirmation") {
+#   d <- dat$ode[, c("time", "daily_confirmed")]
+# }
+# 
+# d <- dat$ode[, c("time", "daily_infected")]
+# if (dtype == "confirmation") {
+#   d <- dat$ode[, c("time", "daily_confirmed")]
+# }
+# https://www.google.com/search?q=%EB%B6%81%ED%95%9C%EC%9D%B8%EA%B5%AC&rlz=1C1GCEU_en-GBKR1039KR1040&oq=%EB%B6%81%ED%95%9C%EC%9D%B8%EA%B5%AC&aqs=chrome..69i57j46i199i465i512j0i512j46i175i199i512j0i512l5.3544j0j7&sourceid=chrome&ie=UTF-8
+# Pop size in North Korea = 25.97*1e6
+Y0 <- c(S=25970000-2e4, E=0, P=0, A=0, I=2e4, R=0, CE=0, CI=0, CR=0)
+
+# dtype <- "symptom onset"
+dtype <- "infection"
+d <- data.frame(time = as.numeric(0:(nrow(dat)-1)), daily_infected = as.numeric(dat$symptomatic))
+d <- d[1:78,]
+
+pdat$params$time_dep_Rt <- FALSE # this must be set FALSE to produce an estimate
+params <- pdat$params
+#standard deviation of the prior distribution
+params[["betavol"]] <- 0.8 
+
+tbegin <- Sys.time()
+
+pf <- pfilter(
+  params = params,
+  y = Y0,
+  data = d,
+  data_type = dtype,
+  npart = 1e3,
+  tend = nrow(d),
+  dt = 0.1,
+  error_pdf = "negbin",
+  # error_pdf = "pois",
+  negbin_size = 5,
+  systematic_resampling = FALSE,
+  backward_sampling = TRUE,
+  stoch = FALSE)
+
+Sys.time() - tbegin
+
+# Rt <- readRDS("outputs/Rt_default.rds")
+epsilon <- params[["epsilon"]]
+delta <- params[["delta"]]
+gamma <- params[["gamma"]]
+bp <- params[["bp"]] # relative infectiousness of pre-symptomatic state
+ba <- params[["ba"]] # relative infectiousness of asymptomatic state
+fa <- params[["fa"]] # fraction of asymptomatic state
+
+durP <- (1 / delta - 1 / epsilon)
+durI <- (1 / gamma)
+R0_dur <- ((1 - fa) + fa * ba) * durI + bp * durP
+
+med <- apply(pf$beta_filtered, 1, quantile, probs = c(0.5))
+lb <- apply(pf$beta_filtered, 1, quantile, probs = c(0.025))
+ub <- apply(pf$beta_filtered, 1, quantile, probs = c(0.975))
+
+plot(d$time, med * R0_dur, type="l", lwd=2, col=1, ylim=c(0,100))
+lines(d$time, ub * R0_dur, lwd=1, col=3)
+lines(d$time, lb * R0_dur, lwd=1, col=3)
+abline(h = 1, ltype=2)
+# plot(dat$time + 2, dat$daily_Rt, type="l", ylim=c(0, max(upper * R0_dur)))
+# plot(dat$ode$time + 2, dat$ode$daily_Rt, type="l")
+# lines(med * R0_dur, lwd=2, col=3)
+df <- cbind(data.frame(date = seq(dat$newdate[1], length.out = nrow(d), by="day")),
+            t(apply(pf$beta_filtered, 1, quantile, probs = c(0.025, 0.5, 0.975))))
+df$`2.5%` <- df$`2.5%` * R0_dur
+df$`97.5%` <- df$`97.5%` * R0_dur
+df$`50%`<- df$`50%` * R0_dur
+df$trace <- pf$trace$beta * R0_dur
+
+plt <- ggplot(df, aes(x = date)) +
+    geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), fill = "steelblue", alpha = 0.5) +
+    # geom_ribbon(aes(ymin = `25%`, ymax = `75%`), fill = col_fill, alpha = 0.8) +
+    geom_line(aes(y = `50%`), color = "steelblue", size = 1.2) +
+  geom_line(aes(y = trace), color = "darkgreen", size = 1.2) +
+    geom_hline(yintercept = 1, color = "darkred", size = 1, linetype = "dashed")+
+    labs(title = "", y = expression(italic(R)[italic(t)]), x = "")
+plt
+ggsave("plots/daily_Rt.png", plot=plt)
+
+
+daily_inf <- t(apply(pf$latent_var_filtered[,,7], 2, quantile, probs = c(0.025, 0.5, 0.975)))
+df <- cbind(data.frame(date = seq(dat$newdate[1], length.out = nrow(d), by="day")), 
+            daily_inf, trace = pf$trace$CE, observed = d$daily_infected)
+
+plt <- ggplot(df, aes(x = date)) +
+    geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), fill = "steelblue", alpha = 0.5) +
+    # geom_ribbon(aes(ymin = `25%`, ymax = `75%`), fill = col_fill, alpha = 0.8) +
+    geom_line(aes(y = `50%`), color = "steelblue", size = 1.2) +
+    geom_line(aes(y = trace), color = "darkgreen", size = 1.2) +
+    geom_point(aes(y = observed), color = "darkred", size = 1)+
+    labs(title = "", y = "New symptomatic cases", x = "")
+plt
+
+ggsave("plots/daily_case_model_obs.png", plot=plt)
+```
+
+
+
+## Particle filtering with backward sampling
+```{r}
+library(pfilterCOVID)
+set.seed(1)
+tstamp <- "20220105"
+I0 <- 100
+# data from the pfilterCOVID package
+pdat <- readRDS(paste0("outputs/Rt_dataset_I0=", I0, "_", tstamp, ".rds"))
+# https://www.google.com/search?q=%EB%B6%81%ED%95%9C%EC%9D%B8%EA%B5%AC&rlz=1C1GCEU_en-GBKR1039KR1040&oq=%EB%B6%81%ED%95%9C%EC%9D%B8%EA%B5%AC&aqs=chrome..69i57j46i199i465i512j0i512j46i175i199i512j0i512l5.3544j0j7&sourceid=chrome&ie=UTF-8
+# pop size in North Korea = 25.97*1e6
+
+pdat$params$Y0 <- c(S=25970000-2e4, E=0, P=0, A=0, I=2e4, R=0, CE=0, CI=0, CR=0)
+usethis::use_data(pdat$params, overwrite = TRUE) #### if asked to overwrite
+
+# dtype <- "symptom onset"
+dtype <- "infection"
+d <- data.frame(time = as.numeric(0:(nrow(dat)-1)), daily_infected = as.numeric(dat$symptomatic))
+d <- d[1:78,]
+
+pdat$params$time_dep_Rt <- FALSE # this must be set FALSE to produce an estimate
+params <- pdat$params
+#standard deviation of the prior distribution
+params[["betavol"]] <- 0.8 
+
+tbegin <- Sys.time()
+
+
+# increase the number to improve accuracy
+nrep <- 1e2
+npart <- 1e3
+dt <- 0.2
+library(parallel)
+library(doParallel)
+
+ncores <- detectCores() 
+dtype <- "confirmation"
+# ODE with perfect observation
+d <- data.frame(date = dat$time,
+               daily_infected = round(dat$ode$daily_infected))
+
+if (dtype == "confirmation") {
+  d <- data.frame(date = dat$time,
+                  daily_confirmed = round(dat$ode$daily_confirmed))
+}
+
+set.seed(42)
+cl <- makeCluster(getOption("cl.cores", 2))
+doParallel::registerDoParallel(cl)
+
+pf <- foreach(i = 1:nrep, .packages = c("pfilterCOVID"), .inorder = F) %dopar% {
+ extract_trace(params = params,
+                    y = params$Y0,
+                    data = d,
+                    data_type = dtype,
+                    npart = npart,
+                    tend = nrow(d),
+                    dt = dt,
+                    error_pdf = "pois",
+                    negbin_size = 15,
+                    backward_sampling = TRUE,
+                    stoch = FALSE)
+}
+
+
+
+parallel::stopCluster(cl)
+  
+parset_chr <- paste0(dtype, "_I0=", params$I0, "_npart=", npart,
+           "_nrep=", nrep, "_dt=", dt, "_", tstamp)
+# saveRDS(pf, paste0("outputs/pf_", parset_chr, ".rds"))
+  
+pr <- c(0.025, 0.25, 0.5, 0.75, 0.975)
+Rt_est <- as.data.frame(sapply(pf, function(x) x[, "Rt"]))
+Rt_quantile <- as.data.frame(t(apply(Rt_est, 1, function(x) quantile(x, pr))))
+  
+df <- cbind(Rt_quantile, d)
+col_fill <- "#1F618D"
+col_dat <- "grey70"
+df$Rt <- dat$ode$daily_Rt
+
+plt <- ggplot(df, aes(x = date)) +
+    geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), fill = col_fill, alpha = 0.5) +
+    geom_ribbon(aes(ymin = `25%`, ymax = `75%`), fill = col_fill, alpha = 0.8) +
+    geom_line(aes(y = `50%`), color = col_fill, size = 1.2) +
+    geom_line(aes(x = date + 1, y = Rt), size = 1, linetype = "dashed") +
+    geom_hline(yintercept = 1, color = "darkred", size = 1, linetype = "dotted")+
+    labs(title = parset_chr, y = expression(italic(R)[italic(t)]), x = "")
+plt
+```
+
+### Run particle filter
+```{r}
+# initial values for state variables
+# https://www.google.com/search?q=%EB%B6%81%ED%95%9C%EC%9D%B8%EA%B5%AC&rlz=1C1GCEU_en-GBKR1039KR1040&oq=%EB%B6%81%ED%95%9C%EC%9D%B8%EA%B5%AC&aqs=chrome..69i57j46i199i465i512j0i512j46i175i199i512j0i512l5.3544j0j7&sourceid=chrome&ie=UTF-8
+# pop size in North Korea = 25.97*1e6
+# Population size 25970000 comes from a Google search
+# 350000 already infected people on Jan
+I0 <- 1e5
+y0 <- c(S=25970000-I0, E=0, I=I0, R=0, CI=0)
+
+params <- list() # input parameters for the SEIR model
+# epsilon and gamma from Kim et al. (2021)
+params$epsilon <- 1/3 # mean latent period = 1/epsilon
+params$delta <- 1/5.2 # mean incubation period = 1/epsilon
+params$gamma <- 1/6.5 # mean infectious period = 1/gamma
+tend <- 50 # simulation end time 50 days
+params[["R0"]] <- 3
+params[["betavol"]] <- 0.4
+
+d <- data.frame(daily_infected = dat$symptomatic)
+
+part <- pfilter(params = params,
+                  y = y0, # initial values of state variables
+                  npart = 1e4,
+                  data = d,
+                  tend = nrow(d)) # input data set)
+```
+
+
+### Summarizing results
+```{r}
+daily_inc_summary <- t(apply(part$latent_var_filtered[,,5], 2, quantile,
+            probs=c(0.025, 0.5, 0.975)))
+
+df <- cbind(data.frame(time = dat$newdate, observed = d$daily_infected), daily_inc_summary)
+
+ggplot(df, aes(x=time)) +
+  geom_ribbon(aes(ymin=`2.5%`, ymax=`97.5%`), fill="steelblue", alpha=0.8)+
+  geom_line(aes(y=`50%`), color="steelblue")+
+  geom_point(aes(y=observed), color = "darkred")+
+  labs(x="Time", y="Daily incidence")+
+  theme_bw()
+
+# ggsave("plots/daily_incidence_pf.png")
+
+dur <- 1/params$gamma
+daily_Rt_summary <- t(apply(part$beta_filtered * dur, 1, quantile,
+                            probs=c(0.025, 0.5, 0.975)))  
+
+df <- as.data.frame(daily_Rt_summary)
+df$time <- dat$newdate
+           
+ggplot(df, aes(x=time)) +
+  geom_ribbon(aes(ymin=`2.5%`, ymax=`97.5%`), fill="darkgreen", alpha=0.8)+
+  geom_line(aes(y=`50%`), color="darkgreen")+ 
+  labs(x="Time", y=expression(italic(R[t])))+
+  theme_bw()
+
+# ggsave("plots/daily_Rt_pf.png")
+```
+
+### Particle filter
+```{r}
+## Let's create the data
+
+pfilter <- function (params, # parameters
+                     y, # initial values of state variables
+                     data, # input data set
+                     npart = 1000, # number of particlar
+                     tend = NULL, # simulation stop time
+                     dt = 0.2,
+                     observed_variable = "daily_infected",
+                     modelled_variable = "CI") {
+  
+  # Assumptions - using daily growth rate
+  nstatevar <- length(y) # number of state variables
+  if(is.null(tend)) {
+    tend = nrow(data)
+  }
+  # to store state variables a
+  latent_var <- array(0,
+                      dim = c(npart, tend, nstatevar),
+                      dimnames = list(NULL, NULL, names(y)))
+  # latent_var[, 1, ] <- y
+  for (nm in names(y)) { # initial value
+    latent_var[, 1, nm] <- y[[nm]]
+  }
+  ## parameters 
+  gamma <- params[["gamma"]]
+  beta0 <- params[["R0"]] * gamma
+  beta_sd <- params[["betavol"]]
+  beta <- matrix(rnorm(npart * tend, mean = 0, sd = beta_sd), nrow = tend)
+  beta[1,] <- beta0 # this is updated at t=2
+  
+  wt <- matrix(NA, nrow = npart, ncol = tend) # weight (likelihood)
+  wt[, 1] <- 1 / npart  # initial weights
+  W <- matrix(NA, nrow = npart, ncol = tend) # normalized weights
+  A <- matrix(NA, nrow = npart, ncol = tend) # Resample according to the normalized weight
+  
+  for (t in 2:tend) {# begin particle loop
+    # beta changes according to a Geometric Brownian motion 
+    beta[t, ] <- beta[t-1, ] * exp(beta[t, ])
+    # run process model
+    latent_var[, t, ] <- SEIR_step(params = params,
+                                   y = latent_var[, t-1, ],
+                                   tbegin = t-1,
+                                   tend = t,
+                                   dt = dt,
+                                   beta = beta[t,])
+    # calculate weights (likelihood)
+    # wt[, t] <- assign_weights(var = latent_var, t = t, data = data)
+    
+    case_expected <- latent_var[, t, modelled_variable]
+    case_data <- round(unlist(data[t, observed_variable]))
+    expected_val <- pmax(0, case_expected) # make sure that the value is not negative
+    # log_lik <- dpois(round(case_data), lambda = expected_val, log = T)
+    # wt[, t] <- exp(log_lik)
+    wt[, t] <- dpois(round(case_data), lambda = expected_val)
+    # normalize particle weights
+    W[, t] <- wt[, t] / sum(wt[, t])
+    # resample particles by sampling parent particles according to weights
+    A[, t] <- sample(1:npart, prob = W[1:npart, t], replace = T)
+    # Resample particles for corresponding variables
+    latent_var[, t,] <- latent_var[A[, t], t,]
+    beta[t,] <- beta[t, A[, t]] #- needed for random walk on beta
+  } # end particle loop
+  
+  # Marginal likelihoods
+  lik_values <- rep(NA, tend)
+  for (t in 1:tend) {
+    lik_values[t] <- log(sum(wt[1:npart, t])) # log-likelihoods
+  }# averaged log likelihoods log(L/(npart^tend))
+  loglik <- - tend * log(npart) + sum(lik_values)
+  
+  return (list(lik_marginal = lik_values,
+               lik_overall_average = loglik,
+               latent_var_filtered = latent_var,
+               beta_filtered = beta,
+               W = W, A = A))
+}
+```
+
+
+### SEIR step
+```{r}
+## differential equations are modeled using the Euler method.
+## This makes it easier 
+# Solve the equation using the Euler-Maruyama method
+SEIR_step <- function (params = NULL,
+                       y = NULL,
+                       tbegin = 0,
+                       tend = 1,
+                       dt = 0.2,
+                       beta = NULL) {
+  
+  y[, c("CI")] <- 0 # reset to zero to hold values from tbegin to tend
+  
+  S <- y[, "S"]
+  E <- y[, "E"]
+  I <- y[, "I"]
+  R <- y[, "R"]
+  daily_infected <- y[, "CI"]
+  
+  N <- S + E + I + R
+  eps <- params[["epsilon"]]
+  gam <- params[["gamma"]]
+  
+  for (i in seq((tbegin + dt), tend, dt)) {
+    # beta is already assumed to be adjusted by N such that it can
+    # be translated to Rt by multiplying the duration of infectiousness
+    S_to_E <- beta * I * dt
+    E_to_I <- E * eps * dt
+    I_to_R <- I * gam * dt
+    
+    # Update state variables
+    S <- S - S_to_E
+    E <- E + S_to_E - E_to_I
+    I <- I + E_to_I - I_to_R
+    R <- R + I_to_R
+    daily_infected <- daily_infected + S_to_E
+  }
+  
+  y[, "S"] <- S
+  y[, "E"] <- E
+  y[, "I"] <- I
+  y[, "R"] <- R
+  y[, "CI"] <- daily_infected
+  
+  return(y)
+}
+```
+
+
+
+### Run particle filter
+```{r}
+# North Korea data cleaned a bit
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+source("src/SEPAIR_step.R")
+source("src/pfilter.R")
+# Initial conditions
+# 350000 already infected people on Jan
+I0 <- 350000
+fa <- 0.306 # fraction of asymptomatic people
+y0 <- c(S=25970000-I0, E=0, P=0, A=fa*I0, I=(1-fa)*I0, R=0, CE=0, CI=0)
+
+params <- list() # input parameters for the SEIR model
+# epsilon and gamma from Kim et al. (2021)
+params$epsilon <- 1/3 # mean latent period = 1/epsilon
+params$delta <- 1/5.2 # mean incubation period = 1/delta
+params$gamma <- 1/6.5 # mean infectious period = 1/gamma
+params$R0 <- 3
+params$betavol <- 0.4
+params$fa <- fa # fraction of asymptomatic state
+params$bp <- 1 # relative infectiousness of pre-symptomatic state
+params$ba <- 1 # relative infectiousness of asymptomatic state
+  
+# d <- data.frame(daily_symptom = dnorth$symptomatic)
+d <- data.frame(daily_infected = dnorth$symptomatic)
+
+part <- pfilter(params = params,
+                y = y0, # initial values of state variables
+                func = SEPAIR_step,
+                npart = 1e4,
+                data = d,
+                tend = nrow(d), 
+                observed_variable = "daily_infected", 
+                modelled_variable = "CE") # input data set)
+```
+### Summarizing results
+```{r}
+library(ggplot2)
+daily_inc_summary <- t(apply(part$latent_var_filtered[,,5], 2, quantile,
+            probs=c(0.025, 0.5, 0.975)))
+
+df <- cbind(data.frame(time = dnorth$newdate, observed = d$daily_infected), daily_inc_summary)
+
+ggplot(df, aes(x=time)) +
+  geom_ribbon(aes(ymin=`2.5%`, ymax=`97.5%`), fill="steelblue", alpha=0.8)+
+  geom_line(aes(y=`50%`), color="steelblue")+
+  geom_point(aes(y=observed), color = "darkred")+
+  labs(x="Time", y="Daily incidence")+
+  theme_bw()
+
+# ggsave("plots/daily_incidence_pf.png")
+
+dur <- 1/params$gamma
+daily_Rt_summary <- t(apply(part$beta_filtered * dur, 1, quantile,
+                            probs=c(0.025, 0.5, 0.975)))  
+
+df <- as.data.frame(daily_Rt_summary)
+df$time <- dat$newdate
+           
+ggplot(df, aes(x=time)) +
+  geom_ribbon(aes(ymin=`2.5%`, ymax=`97.5%`), fill="darkgreen", alpha=0.8)+
+  geom_line(aes(y=`50%`), color="darkgreen")+ 
+  labs(x="Time", y=expression(italic(R[t])))+
+  theme_bw()
+
+# ggsave("plots/daily_Rt_pf.png")
+```

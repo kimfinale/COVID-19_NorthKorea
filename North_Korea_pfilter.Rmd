@@ -1,0 +1,580 @@
+---
+title: "North Korea COVID-19 "
+author: Jong-Hoon Kim
+date: March 22, 2005
+output:
+  md_document:
+    variant: markdown_github
+editor_options: 
+  chunk_output_type: console
+---
+
+### Particle filtering
+```{r}
+# devtools::load_all()
+# devtools::install()
+devtools::install_github("kimfinale/COVID19NorthKorea")
+library(COVID19NorthKorea)
+
+### Run particle filter
+# North Korea data cleaned a bit
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+# Initial conditions
+# 350000 already infected people on Jan
+I0 <- 350000 
+fa <- 0.306 # fraction of asymptomatic people
+y0 <- c(S=25970000-I0, E=0, P=0, A=fa*I0, I=(1-fa)*I0, R=0, CE=0, CI=0)
+
+params <- list() # input parameters for the SEIR model
+# epsilon and gamma from Kim et al. (2021)
+params$epsilon <- 1/3 # mean latent period = 1/epsilon
+params$delta <- 1/5.2 # mean incubation period = 1/delta
+params$gamma <- 1/6.5 # mean infectious period = 1/gamma
+params$R0 <- 3
+params$betavol <- 0.3
+params$fa <- fa # fraction of asymptomatic state
+params$bp <- 1 # relative infectiousness of pre-symptomatic state
+params$ba <- 1 # relative infectiousness of asymptomatic state
+  
+# d <- data.frame(daily_symptom = dnorth$symptomatic)
+d <- data.frame(daily_infected = dnorth$symptomatic)
+
+part <- pfilter(params = params,
+                y = y0, # initial values of state variables
+                func = SEPAIR_step,
+                npart = 1e4,
+                data = d,
+                tend = nrow(d), 
+                observed_variable = "daily_symptom", 
+                modelled_variable = "CI",
+                backward_sampling = TRUE) # input data set)
+```
+
+
+### Add backward sampling
+```{r}
+tracelist <- list()
+for(i in 1:100) {
+  tracelist[[i]] <- vextract_trace(params = params,
+                y = y0, # initial values of state variables
+                func = SEPAIR_step,
+                npart = 1e3,
+                data = d,
+                tend = nrow(d), 
+                observed_variable = "daily_infected", 
+                modelled_variable = "CE", 
+                backward_sampling = TRUE) # input data set)
+}
+
+# saveRDS(tracelist, "outputs/tracelist_20230122.rds")
+```
+
+### Summarizing results
+```{r}
+library(ggplot2)
+daily_inc_summary <- t(apply(part$latent_var_filtered[,,"CE"], 2, quantile,
+            probs=c(0.025, 0.5, 0.975)))
+
+df <- cbind(data.frame(time = dnorth$newdate, observed = d$daily_infected), daily_inc_summary)
+
+ggplot(df, aes(x=time)) +
+  geom_ribbon(aes(ymin=`2.5%`, ymax=`97.5%`), fill="steelblue", alpha=0.8)+
+  geom_line(aes(y=`50%`), color="steelblue")+
+  geom_point(aes(y=observed), color = "darkred")+
+  labs(x="", y="Daily incidence")+
+  theme_bw()
+
+# ggsave("plots/daily_incidence_pf.png")
+
+dur <- 1/params$gamma
+daily_Rt_summary <- t(apply(part$beta_filtered * dur, 1, quantile,
+                            probs=c(0.025, 0.5, 0.975)))  
+
+df <- as.data.frame(daily_Rt_summary)
+df$time <- dnorth$newdate
+           
+ggplot(df, aes(x=time)) +
+  geom_ribbon(aes(ymin=`2.5%`, ymax=`97.5%`), fill="darkgreen", alpha=0.8)+
+  geom_line(aes(y=`50%`), color="darkgreen")+ 
+  labs(x="", y=expression(italic(R[t])))+
+  theme_bw()
+
+# ggsave("plots/daily_Rt_pf.png")
+```
+
+### Summarizing results Backward sampling
+```{r}
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+tracelist <- readRDS("outputs/tracelist_20230122.rds")
+probs <- c(0.025, 0.25, 0.5, 0.75, 0.975)
+
+library(ggplot2)
+
+inc_est <- as.data.frame(sapply(tracelist, function(x) x[, "CE"]))
+inc_quantile <- as.data.frame(t(apply(inc_est, 1, function(x) quantile(x, probs))))
+
+df <- cbind(data.frame(time = dnorth$newdate, observed = dnorth$symptomatic), inc_quantile)
+
+plt <- ggplot(df, aes(x=time)) +
+  geom_ribbon(aes(ymin=`2.5%`, ymax=`97.5%`), fill="steelblue", alpha=0.8)+
+  geom_line(aes(y=`50%`), color="steelblue")+
+  geom_point(aes(y=observed), color = "darkred")+
+  labs(x="", y="Daily incidence")+
+  theme_bw()
+
+ggsave("plots/daily_inc_pfbw.png", plot=plt, height=2.7,
+       width=3.4)
+
+Rt_est <- as.data.frame(sapply(tracelist, function(x) x[, "Rt"]))
+Rt_quantile <- as.data.frame(t(apply(Rt_est, 1, function(x) quantile(x, probs))))
+  
+df <- cbind(Rt_quantile, d)
+# df$Rt <- dat$ode$daily_Rt
+df$date <- dnorth$newdate
+library(ggplot2)
+plt <- ggplot(df, aes(x = date)) +
+    geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), fill = "darkgreen", alpha = 0.5) +
+    geom_line(aes(y = `50%`), color = "darkgreen") +
+    # geom_line(aes(x = date + 1, y = Rt), size = 1, linetype = "dashed") +
+    geom_hline(yintercept = 1, color = "darkred", linetype = "dotted")+
+    labs(y = expression(italic(R)[italic(t)]), x = "")+
+    theme_bw()
+
+ggsave("plots/Rt_pfbw.png", plot=plt, height=2.7,
+       width=3.4)
+```
+
+
+### Doubling time
+Check if the doubling time is very short 
+```{r}
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+
+df <- data.frame(time=1:nrow(dnorth), cumul = dnorth$cumul_symptomatic)
+
+# double_time <- doubling_time(T=7, count = df$cumul) 
+names = c("Shincheonji", "Non-Shincheonji", "Total")
+df_list = list(df.shin, df.nonshin, df.daegu)
+
+out1day = list()
+out7day = list()
+
+dfdt <- data.frame(one_day =  doubling_time(T = 1, count=df$cumul), 
+                   week =  doubling_time(T = 7, count=df$cumul))
+library(dplyr)
+library(kableExtra)
+dfdt %>%
+  mutate(across(where(is.numeric), ~ round(., 1))) %>%
+  kbl(row.names = F) %>%
+  kable_styling(full_width = F, position = "left")
+```
+
+### Logistic population growth
+```{r}
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+library(ggplot2)
+library(dplyr)
+dnorth %>% 
+  ggplot(aes(newdate, cumul_symptomatic)) +
+  geom_point()
+# following the example https://www.ericrscott.com/post/hacking-glms/
+#exponential model fitting
+d <- data.frame(time=1:nrow(dnorth), count = dnorth$cumul_symptomatic)
+
+m_exp <- glm(count ~ time, family = poisson(link="log"), data = d)
+params <- coef(m_exp)
+
+d$pred <- exp(coef(m_exp)[1] + coef(m_exp)[2]*d$time) 
+d$date <- dnorth$newdate
+
+d %>% 
+  ggplot(aes(date)) +
+  geom_point(aes(y=count)) + 
+  geom_line(aes(y=pred))
+```
+
+
+# Ricker model
+
+Finally, the most complicated, possibly mind blowing example of hacking a GLM.  This one took me quite a while to wrap my head around.
+
+A Ricker model takes carrying capacity into account and allows growth rate to change as the population increases. It approximates logistic growth.
+
+$$
+N_{t+1}=N_{t}e^{r\left(1-{\frac {N_{t}}{K}}\right)}
+$$
+where $r = ln(\lambda)$ and $K$ is the carrying capacity
+
+## Hacking a Ricker model GLM
+
+Linearizing using a log-link (please tell me if I got the math wrong in the comments):
+
+
+$$
+log(N_{t+1})=log(N_{t}) + log\left( (e^r)^{\left(1-{\frac {N_{t}}{K}}\right)}\right)
+$$
+
+$$
+log(N_{t+1})=log(N_{t}) + log (e^r)\times{\left(1-{\frac {N_{t}}{K}}\right)}
+$$
+
+$$
+log(N_{t+1})= r-\frac{r}{K}N_{t} + \textrm{offset}[log(N_{t})]
+$$
+
+We can model this with the following GLM:
+
+```{r}
+d2 <- d[2:nrow(d),]
+m_rick <- glm(count ~ count_prev, offset = log(count_prev),
+              family = poisson, data = d2)
+summary(m_rick)
+confint(m_rick)
+```
+
+
+$r = \beta_0$
+
+```{r}
+coef(m_rick)[1]
+```
+
+$\beta_1 = -r/K$
+
+```{r}
+coef(m_rick)[2]
+```
+
+Which means that $K = -\beta_0/\beta_1$
+
+```{r}
+-coef(m_rick)[1]/coef(m_rick)[2]
+```
+
+### Confidence interval for the logistic curve
+```{r}
+# https://fromthebottomoftheheap.net/2017/05/01/glm-prediction-intervals-i/
+mod <- m_rick
+invlink <- family(mod)$linkinv
+newd <- d2
+newd <- cbind(newd, as.data.frame(predict(mod, newd, type = "link", se.fit = TRUE)))
+
+newd$fitted <- invlink(newd$fit)
+newd$upper <- invlink(newd$fit + (2 * newd$se.fit))
+newd$lower <- invlink(newd$fit - (2 * newd$se.fit))
+
+ggplot(newd, aes(x = date)) +
+  # geom_ribbon(aes(ymin = lower, ymax = upper), color = "brown", alpha = 0.5) +
+  geom_ribbon(aes(ymax = upper, ymin = lower) , color="brown") +
+  geom_line(aes(y = fitted)) +
+  geom_point(aes(y = count), color = "red") +
+  labs(x = "", y = "") +
+  theme_bw()
+    
+```
+
+
+
+```{r}
+rm(list=ls()) #clear workspace
+
+#define parameters
+R = c(1.5, 2.3, 2.6, 3.0) #set of R values to plot
+K = 100  #carrying capacity
+Tmax = 100 #length of time to run model
+n1 = c(1, 1, 1, 1) #starting conditions
+
+Ricker <- function(n,r,k) { #define Ricker n(t+1) for n with r and k parameters
+	ntplus1 = n*exp(r*(1-(n/k)))
+	return(ntplus1)
+}
+
+n = matrix(0,length(R),Tmax) #define output matrix
+n[,1] = n1 #set first column of matrix as starting conditions
+T = 1:Tmax #create time vector
+
+for(t in 2:Tmax) { 				#run Ricker function to Tmax, filling n
+	n[,t] = Ricker(n[,t-1],R,K)
+	}
+	
+par(mfrow=c(2,2)) # create a 2x2 graphics space that will be filled by rows
+
+plot(T,n[1,],type="l",xlab = "Time Step", ylab="Population")  #plot all four plots
+plot(T,n[2,],type="l",xlab = "Time Step", ylab="Population")
+plot(T,n[3,],type="l",xlab = "Time Step", ylab="Population")
+plot(T,n[4,],type="l",xlab = "Time Step", ylab="Population")
+```
+
+### ABC SMC
+```{r}
+# devtools::load_all()
+# devtools::install()
+library(COVID19NorthKorea)
+
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
+library(EasyABC)
+prior = list(c("unif",10,200), c("unif",1,30))
+sum_stat_obs = c(350000, dnorth$symptomatic[1:4])
+nsim <- 100
+alpha <- 0.95
+# with alpha=0.8, 13 hours of run did not produce the fit, so alpha was increased to 0.95
+tol <- 0.19
+
+set.seed(1)
+res <- ABC_sequential(method="Delmoral", model=get_sum_stat_sepiar,
+                 prior=prior, nb_simul=nsim,
+                 summary_stat_target=sum_stat_obs, alpha=alpha,
+                 tolerance_target=tol, verbose=F, M=3)
+res$param
+
+```
+
+### ABC SMC parallel using foreach 
+```{r}
+# devtools::load_all()
+# devtools::install()
+library(COVID19NorthKorea)
+library(foreach)
+library(doParallel)
+
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
+library(EasyABC)
+prior = list(c("unif",10,200), c("unif",1,30))
+sum_stat_obs = c(350000, dnorth$symptomatic[1:4])
+nsim <- 100
+alpha <- 0.95
+# with alpha=0.8, 13 hours of run did not produce the fit, so alpha was increased to 0.95
+tol <- 0.09
+
+
+tic <- Sys.time()
+
+cl <- makeCluster(8)
+registerDoParallel(cl)
+
+resp <- foreach(i=1:8,
+                .packages=c("EasyABC", "COVID19NorthKorea")) %dopar% {
+  set.seed(i)
+  # seed has a big impact on the performance of the algorithm.
+  # set.seed(1..9) works fine.   
+  # set.seed(10) doesn't seem to be generating an converging simulation ..          
+  EasyABC::ABC_sequential(method="Delmoral",
+                          model=COVID19NorthKorea::get_sum_stat_sepiar,
+                          prior=prior, nb_simul=nsim,
+                          summary_stat_target=sum_stat_obs, alpha=alpha,
+                          tolerance_target=tol, verbose=F, M=5)
+}
+stopImplicitCluster()
+
+Sys.time() - tic
+
+```
+
+
+
+
+# Run the model using the params
+```{r}
+rngseed <- 2
+set.seed(rngseed)
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+
+dnorth$day <- 0:(nrow(dnorth)-1)
+
+Rcpp::sourceCpp("src/sepiar_stoch.cpp")
+source("src/params_init.R")
+  
+res <- readRDS("outputs/res_abc_20230127.rds")
+pars <- res$param[!duplicated(res$param),]
+
+params <- params_init()
+maxd <- max(round(pars[1,])) # maximum value 
+
+incmat <- matrix(NA, nrow=(maxd + 5), ncol=nrow(pars))
+for (i in 1:nrow(pars)) {
+  eps <- maxd - round(pars[i, 1])
+  params$ndays <- round(pars[i, 1]) + 5 # number of days for output
+  params$R0 <- pars[i, 2] # number of days for output
+  out <- sepiar_stoch(params)
+  day_filter <- seq(1, by=round(1/params$tau), length.out=params$ndays)
+  out <- out[day_filter, "CI"]
+  dayinc <- diff(out)
+  incmat[(2+eps):nrow(incmat), i] <- dayinc
+}
+inc_summary <- as.data.frame(t(apply(incmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
+
+inc_summary$day <- 0:(nrow(inc_summary)-1)
+inc_summary$date <- seq(as.Date("2022-05-13") - nrow(inc_summary) + 4, 
+                        as.Date("2022-05-13") + 3, by="day")
+
+  
+dnorth_daystart <- max(inc_summary$day)-4 # last for days were used for fitting
+dnorth$day <- dnorth$day + dnorth_daystart
+
+# # plot
+# library(ggplot2)
+# plt <- ggplot(inc_summary, aes(x=date)) +
+#   geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`), fill="steelblue", alpha=0.3) + 
+#   geom_ribbon(aes(ymax=`75%`,ymin=`25%`), fill="steelblue", alpha=0.6) +
+#   geom_line(aes(y=`50%`), color="steelblue") + 
+#   geom_col(data=dnorth, aes(x=newdate, y=symptomatic), fill="brown", alpha=0.5, 
+#            inherit.aes = F) + theme_bw() + 
+#   labs(x="", y="Symptomatic cases") +
+#   scale_x_date(date_breaks="1 week", date_labels="%Y-%m-%d", 
+#                limits=c(min(inc_summary$date), as.Date("2022-06-30"))) +
+#   theme(axis.text.x=element_text(angle=60, hjust=1))
+# 
+# ggsave("plots/symptom_abc.png", plt, width=3.4*2, height=2.7*2)
+```
+
+### Rt change model
+Two additional model parameters were introduced.
+Rt1, Rt2, 
+
+```{r}
+# devtools::load_all()
+# devtools::install()
+library(COVID19NorthKorea)
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
+library(EasyABC)
+prior = list(c("unif",10,300), c("unif",1,30), c("unif",0,30), c("unif",0.1,10))
+parm <- params_init()
+sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
+nsim <- 200
+alpha <- 0.9
+# with alpha=0.8, 13 hours of run did not produce the fit, so alpha was increased to 0.95
+tol <- 1.1
+for (s in 1:8) {
+  message("seed = ", s)
+  set.seed(s)
+  res <- ABC_sequential(method="Delmoral", model=get_sum_stat_sepiar2,
+                   prior=prior, nb_simul=nsim,
+                   summary_stat_target=sum_stat_obs, alpha=alpha,
+                   tolerance_target=tol, verbose=F, M=5)
+  # res$param
+  tstamp <- format(Sys.Date(), "%Y%m%d%H")
+  saveRDS(res, sprintf("outputs/abc_4p_%s_seed_%s.rds", tstamp, s))
+}
+
+apply(res$param, 2, summary)
+
+tol <- 1.1
+nsim <- 200
+alpha <- 0.9
+m <- 5 # the number of simulation for one set of parameters (stoch model)
+prior <- list(c("unif",10,300), c("unif",1,30), c("unif",0,30), c("unif",0.1,10))
+
+library(foreach)
+library(doParallel)
+tic <- Sys.time()
+
+cl <- makeCluster(8)
+registerDoParallel(cl)
+
+resp <- foreach(i=1:8,
+                .packages=c("EasyABC", "COVID19NorthKorea")) %dopar% {
+  set.seed(i)
+  EasyABC::ABC_sequential(method="Delmoral",
+                          model=COVID19NorthKorea::get_sum_stat_sepiar2,
+                          prior=prior, nb_simul=nsim,
+                          summary_stat_target=sum_stat_obs, alpha=alpha,
+                          tolerance_target=tol, verbose=F, M=m)
+}
+stopImplicitCluster()
+
+Sys.time() - tic
+tstamp <- format(Sys.Date(), "%Y%m%dT%H%M")
+saveRDS(resp, sprintf("outputs/abc_4p_pl_%s.rds", tstamp))
+```
+
+
+# Run the model using the estimated params 2
+```{r}
+library(COVID19NorthKorea)
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
+
+res <- readRDS("outputs/abc_4p_2023020300_seed_1.rds")
+pars <- res$param[!duplicated(res$param),]
+
+params <- params_init()
+maxd <- max(ceiling(pars[,1])) # maximum value 
+
+incmat <- matrix(NA, nrow=(maxd + params$obslength), ncol=nrow(pars))
+totincmat <- incmat
+for (i in 1:nrow(pars)) {
+  # cat("i = ", i, "\n")
+  eps <- maxd - ceiling(pars[i, 1])
+  params$ndays <- ceiling(pars[i, 1]) + params$obslength # number of days for output
+  params$R0 <- pars[i, 2] # number of days for output
+  params$day_intervention <- ceiling(pars[i, 1]) + pars[i, 3] # number of days for output
+  params$R0_2 <- pars[i, 4]
+  
+  out <- sepiar_stoch(params)
+  day_filter <- seq(1, by=ceiling(1/params$tau), length.out=params$ndays)
+  incmat[(eps+2):nrow(incmat), i] <- diff(out[day_filter, "CI"]) # daily symptomatic
+  totincmat[(eps+2):nrow(incmat), i] <- diff(out[day_filter, "CE"])
+}
+inc_summary <- as.data.frame(t(apply(incmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
+totinc_summary <- as.data.frame(t(apply(totincmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
+
+inc_summary$day <- 0:(nrow(inc_summary)-1)
+# inc_summary$date <- seq(as.Date("2022-05-13") - nrow(inc_summary) + 4, 
+#                         as.Date("2022-05-13") + 3, by="day")
+inc_summary$date <- seq(as.Date("2022-05-13") - maxd, 
+                        as.Date("2022-05-13") + params$obslength - 1, by="day")
+
+totinc_summary$day <- inc_summary$day
+totinc_summary$date <- inc_summary$date
+
+
+dnorth$day <- dnorth$day + maxd
+```
+
+```{r}
+# plot
+library(ggplot2)
+plt <- ggplot(inc_summary, aes(x=date)) +
+  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`), fill="steelblue", alpha=0.3) +
+  geom_ribbon(aes(ymax=`75%`,ymin=`25%`), fill="steelblue", alpha=0.6) +
+  geom_line(aes(y=`50%`), color="steelblue") +
+  geom_ribbon(data=totinc_summary, aes(x=date, ymax=`97.5%`,ymin=`2.5%`), fill="darkgreen", alpha=0.3, inherit.aes=F) +
+  geom_ribbon(data=totinc_summary, aes(x=date, ymax=`75%`,ymin=`25%`), fill="darkgreen", alpha=0.6, inherit.aes=F) +
+  geom_line(data=totinc_summary, aes(x=date, y=`50%`), color="darkgreen",
+            inherit.aes = F) +
+  geom_col(data=dnorth, aes(x=newdate, y=symptomatic), fill="brown", alpha=0.5,
+           inherit.aes = F) + 
+  theme_bw() +
+  labs(x="", y="Case") +
+  scale_x_date(date_breaks="1 week", date_labels="%Y-%m-%d",
+               limits=c(min(inc_summary$date), as.Date("2022-06-30"))) +
+  theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.8e6, ymax=2e6, alpha=0.3, fill="darkgreen") +
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.85e6, ymax=1.95e6, alpha=0.6, fill="darkgreen") +
+  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
+           y=1.9e6, yend=1.9e6, color="darkgreen") +
+  annotate("text", x = as.Date("2022-03-01"), y = 1.9e6, size = 4, 
+           label = "Infection (model)", hjust=0, vjust = 0.5) + 
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.55e6, ymax=1.75e6, alpha=0.3, fill="steelblue") +
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.6e6, ymax=1.7e6, alpha=0.6, fill="steelblue") +
+  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
+           y=1.65e6, yend=1.65e6, color="steelblue") +
+  annotate("text", x = as.Date("2022-03-01"), y = 1.65e6, size = 4, 
+           label = "Symptomatic (model)", hjust=0, vjust = 0.5)+
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.3e6, ymax=1.5e6, alpha=0.5, fill="brown") +
+  annotate("text", x = as.Date("2022-03-01"), y = 1.4e6, size = 4, 
+           label = "Symptomatic (data)", hjust=0, vjust = 0.5)
+plt
+
+tstamp <- format(Sys.time(), "%Y%m%dT%H") 
+ggsave(sprintf("plots/infection_symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
+```
+
