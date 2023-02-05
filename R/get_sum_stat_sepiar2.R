@@ -3,10 +3,13 @@ get_sum_stat_sepiar2 <- function(pars) {
   # sourceCpp("src/sepiar_stoch.cpp")
   params <- params_init()
   # pars[1] gives the day (how many days earlier) when introduction of three cases
-  p1 <- pars[1]
-  params$ndays <- p1 + params$obslength # number of days for output
+  p1 <- round(pars[1]) # integer day makes it clear to model
+  params$ndays <- p1 + params$obslength + 1 # number of days for output
   params$R0 <- pars[2] # number of days for output
-  params$day_intervention <- p1 + pars[3] # number of days for output
+  # previous modeling analyses revealed that almost 0 day (May 13), the intervention started
+  # therefore, arbitrary negative number, -10, were added to explore
+  # the possibility of intervention started earlier
+  params$day_intervention <- p1 + round(pars[3]) # number of days for output
   params$R0_2 <- pars[4] # number of days for output
 
   out <- sepiar_stoch(params)

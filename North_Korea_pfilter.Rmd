@@ -431,32 +431,36 @@ dnorth$day <- dnorth$day + dnorth_daystart
 
 ### Rt change model
 Two additional model parameters were introduced.
-Rt1, Rt2, 
+Rt1, Rt2, d1, d2
 
 ```{r}
-# devtools::load_all()
+# 
 # devtools::install()
 library(COVID19NorthKorea)
+
+devtools::load_all()
 dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
 dnorth$day <- 0:(nrow(dnorth)-1)
 library(EasyABC)
-prior = list(c("unif",10,300), c("unif",1,30), c("unif",0,30), c("unif",0.1,10))
+prior = list(c("unif",10,300), c("unif",1,30), c("unif",-10,30), c("unif",0.1,10))
 parm <- params_init()
 sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
 nsim <- 200
 alpha <- 0.9
 # with alpha=0.8, 13 hours of run did not produce the fit, so alpha was increased to 0.95
-tol <- 1.1
+tol <- 1
+# testpars <- c(50, 6, 0, 0.6) 
+# get_sum_stat_sepiar2(pars=testpars)
 for (s in 1:8) {
   message("seed = ", s)
   set.seed(s)
   res <- ABC_sequential(method="Delmoral", model=get_sum_stat_sepiar2,
                    prior=prior, nb_simul=nsim,
                    summary_stat_target=sum_stat_obs, alpha=alpha,
-                   tolerance_target=tol, verbose=F, M=5)
-  # res$param
-  tstamp <- format(Sys.Date(), "%Y%m%d%H")
-  saveRDS(res, sprintf("outputs/abc_4p_%s_seed_%s.rds", tstamp, s))
+                   tolerance_target=tol, verbose=F, M=3)
+  head(res$param)
+  # tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+  # saveRDS(res, sprintf("outputs/abc_4p_%s_seed_%s.rds", tstamp, s))
 }
 
 apply(res$param, 2, summary)
@@ -491,8 +495,33 @@ saveRDS(resp, sprintf("outputs/abc_4p_pl_%s.rds", tstamp))
 ```
 
 
+
+```{r}
+library(ggplot2)
+res <- readRDS("outputs/abc_4p_2023020300_seed_1.rds")
+pars <- res$param[!duplicated(res$param),]
+df <- as.data.frame(pars)
+names(df) <- c("d1", "R01","d2","R02")
+
+library("bayesplot")
+color_scheme_set("red")
+plt <- mcmc_pairs(df, pars = names(df),
+            labels = c(expression(italic(d)[1]),
+                       expression(italic(R)[paste(0, ",", 1)]),
+                       expression(italic(d)[2]),
+                       expression(italic(R)[paste(0, ",", 2)])),  
+            off_diag_args = list(size = 2, alpha = 1/3))
+plt
+tstamp <- format(Sys.time(), "%Y%m%dT%H") 
+ggsave(sprintf("plots/abc_params_%s.png", tstamp), plt, width=3.4*2, height=3.4*2)
+```
+
+
+
 # Run the model using the estimated params 2
 ```{r}
+# devtools::load_all()
+# devtools::install()
 library(COVID19NorthKorea)
 dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
 dnorth$day <- 0:(nrow(dnorth)-1)
@@ -532,6 +561,38 @@ totinc_summary$date <- inc_summary$date
 
 
 dnorth$day <- dnorth$day + maxd
+```
+
+#### Model vs. data symptomatic 
+```{r}
+library(ggplot2)
+plt <- ggplot(inc_summary, aes(x=date)) +
+  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`), fill="steelblue", alpha=0.3) +
+  geom_ribbon(aes(ymax=`75%`,ymin=`25%`), fill="steelblue", alpha=0.6) +
+  geom_line(aes(y=`50%`), color="steelblue") +
+  geom_col(data=dnorth, aes(x=newdate, y=symptomatic), fill="brown", alpha=0.5,
+           inherit.aes = F) + 
+  theme_bw() +
+  labs(x="", y="Case") +
+  scale_x_date(date_breaks="1 week", date_labels="%Y-%m-%d",
+               limits=c(min(inc_summary$date), as.Date("2022-06-30"))) +
+  theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=0.55e6, ymax=0.75e6, alpha=0.3, fill="steelblue") +
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=0.6e6, ymax=0.7e6, alpha=0.6, fill="steelblue") +
+  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
+           y=0.65e6, yend=0.65e6, color="steelblue") +
+  annotate("text", x = as.Date("2022-03-01"), y = 0.65e6, size = 4, 
+           label = "Symptomatic (model)", hjust=0, vjust = 0.5)+
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=0.3e6, ymax=0.5e6, alpha=0.5, fill="brown") +
+  annotate("text", x = as.Date("2022-03-01"), y = 0.4e6, size = 4, 
+           label = "Symptomatic (data)", hjust=0, vjust = 0.5)
+plt
+
+tstamp <- format(Sys.time(), "%Y%m%dT%H") 
+ggsave(sprintf("plots/symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
 ```
 
 ```{r}
