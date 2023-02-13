@@ -952,20 +952,22 @@ for (s in 1:10) {
 
 ### Epidemic curve by region
 ```{r}
-
 dlist <- rio::import_list("data/(2022-0811)_코로나19_조선중앙TV_보도_현황표_시도별_일일유열자.xlsx")
 nm <- names(dlist)[2:length(dlist)]
 caselist <- vector("list", length(nm))
 for (i in 1:length(nm)) {
-  df <- data.frame(case = dlist[[i+1]]$`당일 발생자수`)
+  # df <- data.frame(case = dlist[[i+1]]$`당일 발생자수`)
+  df <- dlist[[i+1]]
+  # add a few columns to easier management and plotting
+  df$case <- dlist[[i+1]]$`당일 발생자수`
   df$date <- extract_dates(dlist[[i+1]]$기준시)
   df$province <- nm[i]
   caselist[[i]] <- df
 }
 
 df <- do.call("rbind", caselist)
-
-saveRDS(df, "outputs/covid_epideimc_by_province.rds")
+tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+saveRDS(df, paste0("outputs/covid_epideimc_by_province_", tstamp,".rds"))
 
 library(ggplot2)
 p<-ggplot(df, aes(date, case))+
@@ -986,9 +988,11 @@ Set the size of the population who is already infected before May 14
 ```{r}
 devtools::load_all()
 
-df <- readRDS("outputs/covid_epideimc_by_province.rds")
+df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
 province <- unique(df$province)
-
+for(i in 1:length(province)){
+  message(nrow(df[df$province == province[i],]))
+}
 library(EasyABC)
 prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
               c("unif",0.1,2))
@@ -998,16 +1002,25 @@ alpha <- 0.8
 tol <- 8
 nrep <- 10
 
+obslength <- 70
+#obslength is also defined as 70 in the get_sum_stat_sepiar_erlang_province
 for(i in 1:length(province)){
-  dnorth <- df[df$province == province[i],]
-  dnorth$day <- 0:(nrow(dnorth)-1)
-  sum_stat_obs = c(35000, dnorth$case[1:nrow(dnorth)])
-
+  d <- df[df$province == province[i],]
+  d$day <- 0:(nrow(d)-1)
+  # is this a reasonable assumption
+  case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
+  sum_stat_obs <- c(case_before, d$case[1:obslength])
+  # -----------------------------
+  # does NA cause problems? Let's remove NA's and test
+  for (j in 2:length(sum_stat_obs)){
+    sum_stat_obs[j] <- ifelse(is.na(sum_stat_obs[j]), sum_stat_obs[j-1], sum_stat_obs[j]) 
+  }
+  #-------------------------------
   for (s in 1:9) {
-    message("seed = ", s)
+    cat("seed =", s, "\n")
     set.seed(s)
     res <- ABC_sequential(method="Delmoral",
-                          model=get_sum_stat_sepiar_erlang,
+                          model=get_sum_stat_sepiar_erlang_province,
                           prior=prior, nb_simul=nsim,
                           summary_stat_target=sum_stat_obs, 
                           alpha=alpha,
@@ -1021,4 +1034,87 @@ for(i in 1:length(province)){
 
 ```
 
+
+### Stop if it takes more than 10 minutes
+```{r}
+# set.seed(42)
+# sleeps <- sample(10, size=5)
+# sleeps
+# 
+# iter <- 5
+# result <- list()
+# for (i in seq_len(iter)) {
+#   result[[i]] <- tryCatch({
+#     setTimeLimit(elapsed = 6)
+#     Sys.sleep(sleeps[[i]])
+#     setTimeLimit(elapsed = Inf)
+#      c(iter = i, slp = sleeps[[i]])
+#   }, error = function(e) NULL)
+# }
+# 
+# result
+# 
+
+
+devtools::load_all()
+
+df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
+province <- unique(df$province)
+for(i in 1:length(province)){
+  message(nrow(df[df$province == province[i],]))
+}
+library(EasyABC)
+prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
+              c("unif",0.1,2))
+parm <- params_init(erlang=TRUE)
+nsim <- 50
+alpha <- 0.8
+# tol <- 8
+nrep <- 10
+
+obslength <- 70
+#obslength is also defined as 70 in the get_sum_stat_sepiar_erlang_province
+timelimit <- 5*60 # 10 minutes
+for(i in 1:length(province)){
+  d <- df[df$province == province[i],]
+  d$day <- 0:(nrow(d)-1)
+  # is this a reasonable assumption
+  case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
+  sum_stat_obs <- c(case_before, d$case[1:obslength])
+  # -----------------------------
+  # does NA cause problems? Let's remove NA's and test
+  for (j in 2:length(sum_stat_obs)){
+    sum_stat_obs[j] <- ifelse(is.na(sum_stat_obs[j]), sum_stat_obs[j-1], sum_stat_obs[j]) 
+  }
+  #-------------------------------
+  tol <- 10
+  for (s in 1:9) {
+    cat("seed =", s, "\n")
+    set.seed(s)
+    
+    trycatchres <- tryCatch({
+      setTimeLimit(elapsed = timelimit)
+      res <- ABC_sequential(method="Delmoral",
+                            model=get_sum_stat_sepiar_erlang_province,
+                            prior=prior, nb_simul=nsim,
+                            summary_stat_target=sum_stat_obs, 
+                            alpha=alpha,
+                            tolerance_target=tol, verbose=F, M=nrep)
+      
+     setTimeLimit(elapsed = Inf)
+     
+     tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+     saveRDS(res, 
+            sprintf("outputs/abc_4p_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, province[i], tstamp))
+     
+     x <- TRUE   
+     }, error = function(e) NULL)
+     
+    if(is.null(trycatchres)) break;
+    
+    tol <- tol - 1
+  }
+}
+
+```
 
