@@ -1,9 +1,12 @@
-params_init <- function(erlang=FALSE){
-  I0 <- 3 # since SEPIAR model is a stochastic model stochastic die-out possible
-  y0 <- c(S=25970000, E=0, P=0, A=0, I=I0, R=0, CE=0, CI=0)
+params_init <- function(I0=3, pop=25970000, erlang=FALSE){
+  # 25970000 North Korea population size
+  # since SEPIAR model is a stochastic model stochastic die-out possible
+  y0 <- c(S=pop-I0, E=0, P=0, A=0, I=I0, R=0, CE=0, CI=0)
   y0 <- round(y0) # make sure that the y0 are integers
 
   params <- list() # input parameters for the SEIR model
+  params$measure_var <- "CI" # daily diff of CI gives daily symptomatic case
+  params$model <- NULL
   # epsilon and gamma from Kim et al. (2021)
   params$epsilon <- 1/3 # mean latent period = 1/epsilon
   params$delta <- 1/5.2 # mean incubation period = 1/delta
@@ -29,23 +32,20 @@ params_init <- function(erlang=FALSE){
   params$init$CE <- y0[["CE"]]
   params$init$CI <- y0[["CI"]]
 
-
   if (erlang) {
-    y0 <- c(S=25970000, E1=0, E2=0, P1=0, P2=0, A1=0, A2=0, I1=I0, I2=0, R=0, CE=0, CI=0)
-    y0 <- round(y0) # make sure that the y0 are integers
     params$init <- NULL
-    params$init$S <- y0[["S"]]
-    params$init$E1 <- y0[["E1"]]
-    params$init$E2 <- y0[["E2"]]
-    params$init$P1 <- y0[["P1"]]
-    params$init$P2 <- y0[["P2"]]
-    params$init$I1 <- y0[["I1"]]
-    params$init$I2 <- y0[["I2"]]
-    params$init$A1 <- y0[["A1"]]
-    params$init$A2 <- y0[["A2"]]
-    params$init$R <- y0[["R"]]
-    params$init$CE <- y0[["CE"]]
-    params$init$CI <- y0[["CI"]]
+    params$init$S <- pop
+    params$init$E1 <- 0
+    params$init$E2 <- 0
+    params$init$P1 <- 0
+    params$init$P2 <- 0
+    params$init$I1 <- I0
+    params$init$I2 <- 0
+    params$init$A1 <- 0
+    params$init$A2 <- 0
+    params$init$R <- 0
+    params$init$CE <- 0
+    params$init$CI <- 0
   }
 
   return(params)
