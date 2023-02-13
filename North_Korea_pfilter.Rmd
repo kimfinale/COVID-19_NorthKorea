@@ -1054,15 +1054,46 @@ for(i in 1:length(province)){
 # 
 # result
 # 
-
-
 devtools::load_all()
+# create_get_sum_stat_sepiar_erlang_province()
+pop_province <- data.table::fread("data/census_2008.csv")
+pop_province$Province_Korean <- c("양강", "함북", "함남", "강원", "자강", "평북", "평남", "황북", "황남", "평양", "남포")
+pop_province$province_clean <- janitor::make_clean_names(pop_province$Province)
 
-df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
-province <- unique(df$province)
-for(i in 1:length(province)){
-  message(nrow(df[df$province == province[i],]))
+# It appears that ABC_sequential does not take additional parameters for the input function. Since I have to set the initial population  
+
+for(i in 1:nrow(pop_province)){
+  func_str <- sprintf('get_sum_stat_sepiar_erlang_%s <- function(pars) {
+    params <- params_init(erlang=TRUE)
+    params$obslength <- 70 #
+    params$tau <- 0.2 #
+    params$init$S <- %s
+    p1 <- round(pars[1])
+    params$ndays <- p1 + params$obslength + 1
+    params$R0 <- pars[2]
+    params$day_intervention <- p1 + pars[3] #
+    params$R0_2 <- pars[4] #
+
+    out <- sepiar_erlang_stoch(params)
+    day_filter <- seq(1, by = round(1/params$tau), length.out = params$ndays)
+    out <- out[day_filter, "CI"]
+    daily_inc <- diff(out)
+
+    res <- c(sum(daily_inc[1:p1]), daily_inc[(p1+1):(p1+params$obslength)])
+
+    return(res)
+  }', pop_province$province_clean[i], pop_province$Total[i])
+
+  eval(parse(text = func_str))
 }
+  
+df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
+province_kor <- unique(df$province)
+# for(i in 1:length(province)){
+#   message(nrow(df[df$province == province[i],]))
+# }
+
+
 library(EasyABC)
 prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
               c("unif",0.1,2))
@@ -1075,8 +1106,8 @@ nrep <- 10
 obslength <- 70
 #obslength is also defined as 70 in the get_sum_stat_sepiar_erlang_province
 timelimit <- 5*60 # 10 minutes
-for(i in 1:length(province)){
-  d <- df[df$province == province[i],]
+for(i in 1:nrow(pop_province)){
+  d <- df[df$province == pop_province$Province_Korean[i],]
   d$day <- 0:(nrow(d)-1)
   # is this a reasonable assumption
   case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
@@ -1088,6 +1119,8 @@ for(i in 1:length(province)){
   }
   #-------------------------------
   tol <- 10
+  model <- eval(parse(text=paste0("get_sum_stat_sepiar_erlang_", pop_province$province_clean[i])))
+  
   for (s in 1:9) {
     cat("seed =", s, "\n")
     set.seed(s)
@@ -1095,9 +1128,8 @@ for(i in 1:length(province)){
     trycatchres <- tryCatch({
       setTimeLimit(elapsed = timelimit)
       res <- ABC_sequential(method="Delmoral",
-                            model=get_sum_stat_sepiar_erlang_province,
-                            prior=prior, nb_simul=nsim,
-                            summary_stat_target=sum_stat_obs, 
+                            model=model,
+                            prior=prior, nb_simul=nsim,                            summary_stat_target=sum_stat_obs, 
                             alpha=alpha,
                             tolerance_target=tol, verbose=F, M=nrep)
       
@@ -1105,16 +1137,46 @@ for(i in 1:length(province)){
      
      tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
      saveRDS(res, 
-            sprintf("outputs/abc_4p_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, province[i], tstamp))
+            sprintf("outputs/abc_4p_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, pop_province$province_clean[i], tstamp))
      
      x <- TRUE   
      }, error = function(e) NULL)
      
-    if(is.null(trycatchres)) break;
+    if (is.null(trycatchres)) break;
     
     tol <- tol - 1
   }
 }
 
 ```
+
+### Run the model by province
+
+```{r}
+devtools::load_all()
+
+df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
+province <- unique(df$province)
+
+obslength <- 70
+d <- df[df$province == province[1],]
+d$day <- 0:(nrow(d)-1)
+
+params <- params_init(erlang=TRUE)
+params$obslength <- 70 #
+params$tau <- 0.2
+#
+runres <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_2_seed_9_평양_20230213T141822.rds")
+pars <- runres$param[!duplicated(runres$param),]
+apply(pars, 2, summary)
+res <- run_sepiar(params=params, model=sepiar_erlang_stoch, params2=pars)
+mod <- res$symptomatic
+library(ggplot2)
+p <- plot_model_data(model=mod, data=d)
+p
+
+p <- p + labs(x="", y="Case")
+p
+```
+
 
