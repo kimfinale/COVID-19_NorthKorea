@@ -1,5 +1,6 @@
-get_sum_stat_sepiar2 <- function(pars) {
-  params <- params_init()
+get_sum_stat_sepiar_erlang <- function(pars) {
+  params <- params_init(erlang=TRUE)
+  params$tau <- 0.2 #
   # pars[1] gives the day (how many days earlier) when introduction of three cases
   p1 <- round(pars[1]) # integer day makes it clear to model
   params$ndays <- p1 + params$obslength + 1 # number of days for output
@@ -10,7 +11,7 @@ get_sum_stat_sepiar2 <- function(pars) {
   params$day_intervention <- p1 + pars[3] # number of days for output
   params$R0_2 <- pars[4] # number of days for output
 
-  out <- sepiar_stoch(params)
+  out <- sepiar_erlang_stoch(params)
   day_filter <- seq(1, by = round(1/params$tau), length.out = params$ndays)
   out <- out[day_filter, "CI"]
   daily_inc <- diff(out)

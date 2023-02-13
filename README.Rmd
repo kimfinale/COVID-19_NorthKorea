@@ -1,0 +1,58 @@
+---
+output: github_document
+---
+
+
+```{r global_options, echo=F}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
+```
+
+### COVID-19 in North Korea
+
+```{r  results='hide'}
+library(readxl)
+library(ggplot2)
+
+dat <- read_xlsx("data/covid19_daily.xlsx")
+names(dat) <- c("date", "symptomatic", "recovered", "deaths", "cumul_symptomatic", "cumul_recovered", "cumul_isolated", "cumul_deaths")
+dat <- dat[3:(nrow(dat)-1),]
+library(dplyr)
+dat %>% 
+  mutate(across(2:8, as.integer),
+         newdate = seq(from=as.Date("2022-05-13"), 
+                       to=as.Date("2022-08-10"), by="day"), 
+         cfr = cumul_deaths / cumul_symptomatic) -> dat
+
+# d <- dat[,"newdate", ]
+# sum((dat$cumul_symptomatic - dat$cumul_recovered - dat$cumul_isolated) != 0)
+# tstamp <- format(Sys.time(), "%Y%m%d")
+# saveRDS(dat, paste0("outputs/NorthKorea_dat_", tstamp, ".rds"))
+```
+
+- 신규 유열자 (new symptomatic cases) were first repoorted on `r format(dat$newdate[1], "%B %d, %Y")` ($n$ = `r dat$symptomatic[1]`).
+- There were, however, `r dat$cumul_symptomatic[1]` symptomatic cases already on `r format(dat$newdate[1], "%B %d, %Y")`.
+- In total, `r dat$cumul_symptomatic[nrow(dat)]` cases were reported `r format(dat$newdate[1], "%B %d, %Y")` through `r format(dat$newdate[nrow(dat)], "%B %d, %Y")`
+- Case fatality ratio was very low: CFR = `r format(round(dat$cfr[nrow(dat)], digits=8), scientific=FALSE)`
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+library(tidyr)
+
+dat %>%  select(newdate, symptomatic, cumul_symptomatic) %>%
+  pivot_longer(cols=c(2,3), names_to = "daily_cumul") -> d
+
+plt <- ggplot(d, aes(newdate, value))+
+  geom_line()+
+  geom_point()+
+  labs(x="", y="")+
+  ggtitle("Symptomatic cases")+
+  facet_wrap(~daily_cumul, nrow=2, scales="free_y")
+
+plt
+# Alene, Muluneh, Leltework Yismaw, Moges Agazhe Assemie, Daniel Bekele Ketema, Wodaje Gietaneh, and Tilahun Yemanu Birhan. “Serial Interval and Incubation Period of COVID-19: A Systematic Review and Meta-Analysis.” BMC Infectious Diseases 21, no. 1 (December 2021): 1–9. https://doi.org/10.1186/s12879-021-05950-x.
+
+#Abstract: ... mean serial interval of COVID-19 was 5.2 (95%CI: 4.9–5.5) days
+SI <- 5.2
+SI_std <- (5.5-5.2)/1.96
+```
+
+

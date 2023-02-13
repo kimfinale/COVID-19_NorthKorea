@@ -13,3 +13,7 @@ sepiar_erlang_stoch <- function(params) {
     .Call(`_COVID19NorthKorea_sepiar_erlang_stoch`, params)
 }
 
+sepiar_erlang_euler <- function(params) {
+    .Call(`_COVID19NorthKorea_sepiar_erlang_euler`, params)
+}
+

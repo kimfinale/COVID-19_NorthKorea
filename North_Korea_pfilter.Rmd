@@ -436,33 +436,84 @@ Rt1, Rt2, d1, d2
 ```{r}
 # 
 # devtools::install()
-library(COVID19NorthKorea)
+# devtools::load_all()
+# library(COVID19NorthKorea)
 
 devtools::load_all()
+# 
 dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
 dnorth$day <- 0:(nrow(dnorth)-1)
 library(EasyABC)
-prior = list(c("unif",10,300), c("unif",1,30), c("unif",-10,30), c("unif",0.1,10))
+prior = list(c("unif",15,150), c("unif",1,30), c("unif",-5,10), c("unif",0.1,2))
 parm <- params_init()
 sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
-nsim <- 200
-alpha <- 0.9
+nsim <- 50
+alpha <- 0.8
 # with alpha=0.8, 13 hours of run did not produce the fit, so alpha was increased to 0.95
-tol <- 1
+tol <- 6
 # testpars <- c(50, 6, 0, 0.6) 
 # get_sum_stat_sepiar2(pars=testpars)
-for (s in 1:8) {
+for (s in 3:12) {
   message("seed = ", s)
   set.seed(s)
   res <- ABC_sequential(method="Delmoral", model=get_sum_stat_sepiar2,
                    prior=prior, nb_simul=nsim,
                    summary_stat_target=sum_stat_obs, alpha=alpha,
+                   tolerance_target=tol, verbose=F, M=5)
+  # head(res$param)
+  tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+  saveRDS(res, sprintf("outputs/abc_4p_%s_tol_%s_seed_%s.rds", tol, tstamp, s))
+  tol <- tol - 0.5
+}
+```
+
+### Run for 10 minutes for each seed for RNG
+The sampling varies by the random seed. 
+```{r}
+devtools::load_all()
+
+library(EasyABC)
+
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
+prior = list(c("unif",10,300), c("unif",1,30), c("unif",-10,30), c("unif",0.1,10))
+parm <- params_init()
+sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
+nsim <- 200
+alpha <- 0.9
+
+tol <- 1.1
+
+run_abc_seed <- function(seed, tol=1.1){
+  set.seed(seed)
+  res <- ABC_sequential(method="Delmoral", model=get_sum_stat_sepiar2,
+                   prior=prior, nb_simul=nsim,
+                   summary_stat_target=sum_stat_obs, alpha=alpha,
                    tolerance_target=tol, verbose=F, M=3)
-  head(res$param)
-  # tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-  # saveRDS(res, sprintf("outputs/abc_4p_%s_seed_%s.rds", tstamp, s))
+  tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+  saveRDS(res, sprintf("outputs/abc_4p_%s_seed_%s.rds", tstamp, seed))
 }
 
+  
+
+library(R.utils)
+timelimit <- 10 # in seconds
+tol <- 2
+for(i in 1:10) {
+  cat("i =", i, "\n")
+  msg <- withTimeout({run_abc_seed(seed=i, tol=tol)}, 
+                     timeout=timelimit, onTimeout="warning")
+  if(is.null(msg)){
+    tol <- tol + i
+  }
+}
+
+
+
+
+```
+
+```{r}
 apply(res$param, 2, summary)
 
 tol <- 1.1
@@ -495,16 +546,83 @@ saveRDS(resp, sprintf("outputs/abc_4p_pl_%s.rds", tstamp))
 ```
 
 
-
+#### Plot: parameter estimates
 ```{r}
 library(ggplot2)
-res <- readRDS("outputs/abc_4p_2023020300_seed_1.rds")
-pars <- res$param[!duplicated(res$param),]
+# res <- readRDS("outputs/abc_4p_2023020300_seed_1.rds")
+# res <- readRDS("outputs/abc_4p_20_tol_20230206T073915_seed_2.rds")
+# pars <- res$param[!duplicated(res$param),]
+
+reslist <- vector("list", length=9)
+i <- 1
+for(s in 12:20) {
+  reslist[[i]] <- readRDS(sprintf("outputs/abc_4p_2023020500_seed_%s.rds", s))$param
+  i <- i + 1
+}
+pars <- do.call("rbind", reslist)
+pars <- pars[!duplicated(pars),]
+pars <- pars[sample(1:nrow(pars), 200),]
+
 df <- as.data.frame(pars)
 names(df) <- c("d1", "R01","d2","R02")
 
 library("bayesplot")
 color_scheme_set("red")
+p <- mcmc_pairs(df, pars = names(df),
+            labels = c(expression(italic(d)[1]),
+                       expression(italic(R)[paste(0, ",", 1)]),
+                       expression(italic(d)[2]),
+                       expression(italic(R)[paste(0, ",", 2)])),  
+            off_diag_args = list(size = 2, alpha = 1/3))
+p
+# tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S") 
+# ggsave(sprintf("plots/abc_params_%s.png", tstamp), p, width=3.4*2, height=3.4*2)
+
+```
+
+#### Parameter combine
+
+```{r}
+reslist <- vector("list", length=9)
+i <- 1
+for(s in 12:20) {
+  reslist[[i]] <- readRDS(sprintf("outputs/abc_4p_2023020500_seed_%s.rds", s))$param
+  i <- i + 1
+}
+pars <- do.call("rbind", reslist)
+pars <- pars[!duplicated(pars),]
+pars <- pars[sample(1:nrow(pars), 200),]
+
+parm <- params_init()
+sum_stat_obs <- c(350000, dnorth$symptomatic[1:parm$obslength])
+ddata <- sqrt(sum(sum_stat_obs^2))
+# stats <- matrix(NA, nrow=nrow(pars), ncol=length(sum_stat_obs))
+stats <- matrix(NA, nrow=nrow(pars), ncol=length(sum_stat_obs))
+rmse <- matrix(NA, nrow=nrow(pars), ncol=1)
+for(i in 1:nrow(pars)){
+  stats[i,] <- get_sum_stat_sepiar2(pars[i,])
+  rmse[i, ] <- sqrt(sum((stats[i,] - sum_stat_obs)^2)) / ddata
+}
+
+
+```
+
+```{r}
+
+# res <- readRDS("outputs/abc_4p_19_tol_20230206T091609_seed_2.rds")
+# pars <- res$param
+# pars <- pars[!duplicated(pars),]
+# hist(pars[,4])
+
+library(ggplot2)
+df <- as.data.frame(pars)
+names(df) <- c("d1", "R01","d2","R02")
+
+library("bayesplot")
+color_scheme_set("red")
+mcmc_pairs(df, pars = c("d1", "R01","d2","R02"),
+           off_diag_args = list(size = 1.5))
+
 plt <- mcmc_pairs(df, pars = names(df),
             labels = c(expression(italic(d)[1]),
                        expression(italic(R)[paste(0, ",", 1)]),
@@ -514,20 +632,33 @@ plt <- mcmc_pairs(df, pars = names(df),
 plt
 tstamp <- format(Sys.time(), "%Y%m%dT%H") 
 ggsave(sprintf("plots/abc_params_%s.png", tstamp), plt, width=3.4*2, height=3.4*2)
+
 ```
 
 
 
 # Run the model using the estimated params 2
 ```{r}
-# devtools::load_all()
+devtools::load_all()
 # devtools::install()
-library(COVID19NorthKorea)
+# library(COVID19NorthKorea)
 dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
 dnorth$day <- 0:(nrow(dnorth)-1)
 
-res <- readRDS("outputs/abc_4p_2023020300_seed_1.rds")
+# res <- readRDS("outputs/abc_4p_2023020300_seed_1.rds")
+res <- readRDS("outputs/abc_4p_3.5_tol_20230209T103752_seed_8.rds")
 pars <- res$param[!duplicated(res$param),]
+
+# reslist <- vector("list", length=9)
+# i <- 1
+# for(s in 12:20) {
+#   reslist[[i]] <- readRDS(sprintf("outputs/abc_4p_2023020500_seed_%s.rds", s))$param
+#   i <- i + 1
+# }
+# pars <- do.call("rbind", reslist)
+# pars <- pars[!duplicated(pars),]
+# pars <- pars[sample(1:nrow(pars), 200),]
+
 
 params <- params_init()
 maxd <- max(ceiling(pars[,1])) # maximum value 
@@ -563,7 +694,7 @@ totinc_summary$date <- inc_summary$date
 dnorth$day <- dnorth$day + maxd
 ```
 
-#### Model vs. data symptomatic 
+#### Plot: Model vs. data symptomatic 
 ```{r}
 library(ggplot2)
 plt <- ggplot(inc_summary, aes(x=date)) +
@@ -591,11 +722,13 @@ plt <- ggplot(inc_summary, aes(x=date)) +
            label = "Symptomatic (data)", hjust=0, vjust = 0.5)
 plt
 
-tstamp <- format(Sys.time(), "%Y%m%dT%H") 
-ggsave(sprintf("plots/symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
+# tstamp <- format(Sys.time(), "%Y%m%dT%H") 
+# ggsave(sprintf("plots/symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
 ```
 
-```{r}
+
+#### Plot; Inc, Symptomatic
+```{r }
 # plot
 library(ggplot2)
 plt <- ggplot(inc_summary, aes(x=date)) +
@@ -635,7 +768,257 @@ plt <- ggplot(inc_summary, aes(x=date)) +
            label = "Symptomatic (data)", hjust=0, vjust = 0.5)
 plt
 
-tstamp <- format(Sys.time(), "%Y%m%dT%H") 
-ggsave(sprintf("plots/infection_symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
+# tstamp <- format(Sys.time(), "%Y%m%dT%H") 
+# ggsave(sprintf("plots/infection_symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
 ```
+
+
+### 4 parameters, SEPIAR Erlang distributed model
+Two additional model parameters were introduced.
+Rt1, Rt2, d1, d2
+
+```{r}
+# devtools::install()
+# library(COVID19NorthKorea)
+devtools::load_all()
+```
+
+
+```{r}
+#      
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
+library(EasyABC)
+# if the day of introduction is extended to 300 days, the Delmoral method does not seem to converge. This may be that the early introduction of the infection generates a more complex scenario of potential two peaks, which makes exploring parameter space challenging
+prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
+              c("unif",0.1,2))
+parm <- params_init(erlang=TRUE)
+sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
+nsim <- 50
+alpha <- 0.8
+tol <- 10
+nrep <- 10
+# testpars <- c(50, 6, 0, 0.6)
+# get_sum_stat_sepiar_erlang(pars=testpars)
+# for(alpha in c(0.8,0.9,0.99)){
+   for (s in 1:9) {
+    message("seed = ", s)
+    set.seed(s)
+    res <- ABC_sequential(method="Delmoral",
+                          model=get_sum_stat_sepiar_erlang,
+                          prior=prior, nb_simul=nsim,
+                          summary_stat_target=sum_stat_obs, alpha=alpha,
+                          tolerance_target=tol, verbose=F, M=nrep)
+    tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+    saveRDS(res, sprintf("outputs/abc_4p_erlang_step_0p2_alpha_%s_tol_%s_seed_%s_%s.rds", alpha, tol, s, tstamp))
+    tol <- tol - 1
+  }
+# }
+```
+
+
+### Run the model using the estimated params SEPIAR Erlang
+```{r}
+# res <- readRDS("outputs/abc_4p_erlang_19_tol_20230206T225544_seed_20.rds")
+devtools::load_all()
+# res <- readRDS("outputs/abc_4p_erlang_9_tol_20230207T061715_seed_7.rds")
+# res <- readRDS("outputs/abc_4p_erlang_step_0p2_tol_8_seed_1_20230207T064925.rds")
+# res <- readRDS("outputs/abc_4p_erlang_step_0p2_tol_6.5_seed_4_20230207T074421.rds")
+res <- readRDS("outputs/abc_4p_erlang_step_0p2_tol_8_seed_1_20230207T064925.rds")
+pars <- res$param[!duplicated(res$param),]
+
+apply(pars, 2, summary)
+params <- params_init(erlang=TRUE)
+params$tau <- 0.2
+maxd <- max(round(pars[,1])) # maximum value 
+incmat <- matrix(NA, nrow=(maxd + params$obslength), ncol=nrow(pars))
+totincmat <- incmat
+
+for (i in 1:nrow(pars)) {
+  # cat("i = ", i, "\n")
+  eps <- maxd - round(pars[i, 1])
+  params$ndays <- round(pars[i, 1]) + params$obslength + 1 # number of days for output
+  params$R0 <- pars[i, 2] # number of days for output
+  params$day_intervention <- round(pars[i, 1]) + round(pars[i, 3]) # number of days for output
+  params$R0_2 <- pars[i, 4]
+  
+  out <- sepiar_erlang_stoch(params)
+  day_filter <- seq(1, by=ceiling(1/params$tau), length.out=params$ndays)
+  incmat[(eps+1):nrow(incmat), i] <- diff(out[day_filter, "CI"]) # daily symptomatic
+  totincmat[(eps+1):nrow(incmat), i] <- diff(out[day_filter, "CE"])
+}
+
+inc_summary <- as.data.frame(t(apply(incmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
+totinc_summary <- as.data.frame(t(apply(totincmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
+
+inc_summary$day <- 0:(nrow(inc_summary)-1)
+# inc_summary$date <- seq(as.Date("2022-05-13") - nrow(inc_summary) + 4, 
+#                         as.Date("2022-05-13") + 3, by="day")
+inc_summary$date <- seq(as.Date("2022-05-13") - maxd, 
+                        as.Date("2022-05-13") + params$obslength - 1, by="day")
+
+totinc_summary$day <- inc_summary$day
+totinc_summary$date <- inc_summary$date
+
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
+dnorth$day <- dnorth$day + maxd
+
+```
+
+### Euler, Erlang, 4 parameters,
+Two additional model parameters were introduced.
+Rt1, Rt2, d1, d2
+
+```{r}
+# devtools::install()
+# library(COVID19NorthKorea)
+devtools::load_all()
+```
+
+```{r}
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
+library(EasyABC)
+prior <- list(c("unif", 5, 60), c("unif",1, 20), c("unif",-5,10), 
+              c("unif", 0.1, 1))
+parm <- params_init(erlang=TRUE)
+sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
+nsim <- 50
+alpha <- 0.8
+tol <- 5.0
+nrep <- 1 # no repeat is necessary for the ODE model
+testpars <- c(40, 6, 0, 0.6) 
+get_sum_stat_sepiar_erlang_euler(pars=testpars)
+# for(alpha in c(0.8,0.9,0.99)){
+for (s in 1:20) {
+  message("seed = ", s)
+  set.seed(s)
+  res <- ABC_sequential(method="Delmoral",
+                        model=get_sum_stat_sepiar_erlang_euler,
+                        prior=prior, nb_simul=nsim,
+                        summary_stat_target=sum_stat_obs, alpha=alpha,
+                        tolerance_target=tol, verbose=F, M=nrep)
+  tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+  saveRDS(res, sprintf("outputs/abc_4p_erlang_euler_alpha_%s_tol_%s_seed_%s_%s.rds", alpha, tol, s, tstamp))
+  tol <- tol - 0.2
+}
+# }
+```
+
+
+### Beaumont method 
+Euler, Erlang, 4 parameters,
+Two additional model parameters were introduced.
+Rt1, Rt2, d1, d2
+
+```{r}
+# devtools::install()
+# library(COVID19NorthKorea)
+devtools::load_all()
+library(EasyABC)
+```
+
+```{r}
+#      
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
+library(EasyABC)
+prior <- list(c("unif", 5, 60), c("unif",1, 20), c("unif",-5,10), 
+              c("unif", 0.1, 1))
+parm <- params_init(erlang=TRUE)
+sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
+nsim <- 50
+tolseq <- 15:10
+nrep <- 1 # no repeat is necessary for the ODE model
+testpars <- c(40, 6, 0, 0.6) 
+get_sum_stat_sepiar_erlang_euler(pars=testpars)
+# for(alpha in c(0.8,0.9,0.99)){
+for (s in 1:10) {
+  message("seed = ", s)
+  set.seed(s)
+  res <- ABC_sequential(method="Beaumont",
+                        model=get_sum_stat_sepiar_erlang_euler,
+                        prior=prior, nb_simul=nsim,
+                        summary_stat_target=sum_stat_obs, 
+                        tolerance_tab=tolseq)
+  
+  tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+  saveRDS(res, sprintf("outputs/abc_4p_erlang_euler_beaumont_tolseqend_%s_seed_%s_%s.rds", tolseq[length(tolseq)], s, tstamp))
+  tolseq <- c(tolseq, tolseq[length(tolseq)] - 0.7)
+}
+# }
+```
+
+### Epidemic curve by region
+```{r}
+
+dlist <- rio::import_list("data/(2022-0811)_코로나19_조선중앙TV_보도_현황표_시도별_일일유열자.xlsx")
+nm <- names(dlist)[2:length(dlist)]
+caselist <- vector("list", length(nm))
+for (i in 1:length(nm)) {
+  df <- data.frame(case = dlist[[i+1]]$`당일 발생자수`)
+  df$date <- extract_dates(dlist[[i+1]]$기준시)
+  df$province <- nm[i]
+  caselist[[i]] <- df
+}
+
+df <- do.call("rbind", caselist)
+
+saveRDS(df, "outputs/covid_epideimc_by_province.rds")
+
+library(ggplot2)
+p<-ggplot(df, aes(date, case))+
+  geom_col(fill="brown", alpha=0.5)+
+  theme_bw() +
+  labs(x="", y="Symptomatic case") +
+  facet_wrap(~province)
+p
+
+# tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+# ggsave(sprintf("plots/epidemic_curve_%s.png", tstamp), p, width=3.4*3, height=2.7*3)
+```
+
+### Parameter estimation by region
+Set the population size correct for the province
+Set the size of the population who is already infected before May 14
+
+```{r}
+devtools::load_all()
+
+df <- readRDS("outputs/covid_epideimc_by_province.rds")
+province <- unique(df$province)
+
+library(EasyABC)
+prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
+              c("unif",0.1,2))
+parm <- params_init(erlang=TRUE)
+nsim <- 50
+alpha <- 0.8
+tol <- 8
+nrep <- 10
+
+for(i in 1:length(province)){
+  dnorth <- df[df$province == province[i],]
+  dnorth$day <- 0:(nrow(dnorth)-1)
+  sum_stat_obs = c(35000, dnorth$case[1:nrow(dnorth)])
+
+  for (s in 1:9) {
+    message("seed = ", s)
+    set.seed(s)
+    res <- ABC_sequential(method="Delmoral",
+                          model=get_sum_stat_sepiar_erlang,
+                          prior=prior, nb_simul=nsim,
+                          summary_stat_target=sum_stat_obs, 
+                          alpha=alpha,
+                          tolerance_target=tol, verbose=F, M=nrep)
+    tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+    saveRDS(res, 
+            sprintf("outputs/abc_4p_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, province[i], tstamp))
+    tol <- tol - 1
+  }
+}
+
+```
+
 
