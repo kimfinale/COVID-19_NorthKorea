@@ -1244,7 +1244,6 @@ ggplot(d)+
 ```{r}
 devtools::load_all()
 pop_province <- readRDS("outputs/pop_province_20230213.rds")
-
 df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
 province_kor <- unique(df$province)
 
@@ -1282,7 +1281,7 @@ for(i in 1:nrow(pop_province)){
   PARAMETERS$model <- sepiar_erlang_stoch
   PARAMETERS$measure_var <- "CI"
   # -----------------------------------------------
-  tol <- 5
+  tol <- 10
   
   for (s in 1:9) {
     cat("seed =", s, "\n")
@@ -1307,7 +1306,7 @@ for(i in 1:nrow(pop_province)){
      
     if (is.null(trycatchres)) break;
     
-    tol <- tol - 0.5
+    tol <- tol - 1
   }
 }
 

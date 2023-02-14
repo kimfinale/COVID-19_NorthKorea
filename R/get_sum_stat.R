@@ -1,7 +1,8 @@
 get_sum_stat <- function(pars) {
   daily_inc <- daily_incidence(pars=pars)
-  # res <- daily_incidence(pars=pars)
-  # daily_inc <- res[, "CI"]
+  if (ncol(daily_inc) > 1){
+    stop("More than one column in the daily incidence output")
+  }
   p1 <- pars[1]
   res <- c(sum(daily_inc[1:p1]), daily_inc[(p1+1):length(daily_inc)])
 

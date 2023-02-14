@@ -948,10 +948,9 @@ ggplot(d)+
 ### Run using global variables
 ```{r}
 devtools::load_all()
-pop_province <- readRDS("outputs/pop_province_20230213.rds")
-
-df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
-province_kor <- unique(df$province)
+pop <- readRDS("outputs/pop_province_20230213.rds")
+dat <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
+# province_kor <- unique(dat$province)
 
 replace_NA_with_previous <- function(x){
   for(j in 2:length(x)){   
@@ -963,7 +962,7 @@ replace_NA_with_previous <- function(x){
 library(EasyABC)
 prior <- list(c("unif",5,150), c("unif",1,20), 
               c("unif",-5,10), c("unif",0.1,2))
-parm <- params_init(erlang=TRUE)
+
 nsim <- 50
 alpha <- 0.8
 # tol <- 8
@@ -972,8 +971,11 @@ nrep <- 10
 obslength <- 70
 timelimit <- 10*60 # 10 minutes
 
-for(i in 1:nrow(pop_province)){
-  d <- df[df$province == pop_province$Province_Korean[i],]
+model <- sepiar_erlang_stoch
+measure_var <- "CI"
+erlang <- TRUE  
+for(i in 1:nrow(pop)){
+  d <- dat[dat$province == pop$Province_Korean[i],]
   d$day <- 0:(nrow(d)-1)
   # is this a reasonable assumption
   case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
@@ -982,10 +984,10 @@ for(i in 1:nrow(pop_province)){
   
   # set the global variables ------------------
   # initial population size by region
-  pop <- get_population_size(region = pop_province$province_clean[i])
-  PARAMETERS <- params_init(I0=3, pop=pop, erlang=TRUE)
-  PARAMETERS$model <- sepiar_erlang_stoch
-  PARAMETERS$measure_var <- "CI"
+  pop_prov <- get_population_size(region = pop$province_clean[i])
+  PARAMETERS <- params_init(I0=3, pop=pop_prov, erlang=erlang)
+  PARAMETERS$model <- model
+  PARAMETERS$measure_var <- measure_var
   # -----------------------------------------------
   tol <- 5
   
@@ -1005,7 +1007,7 @@ for(i in 1:nrow(pop_province)){
      
      tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
      saveRDS(res, 
-            sprintf("outputs/abc_4p_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, pop_province$province_clean[i], tstamp))
+            sprintf("outputs/abc_4p_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, pop$province_clean[i], tstamp))
      
      x <- TRUE   
      }, error = function(e) NULL)
@@ -1017,3 +1019,47 @@ for(i in 1:nrow(pop_province)){
 }
 
 ```
+
+
+### Run the model by province
+
+```{r}
+devtools::load_all()
+pop <- readRDS("outputs/pop_province_20230213.rds")
+dat <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
+# province_kor <- unique(dat$province)
+province <- unique(dat$province)
+obslength <- 70
+# d <- dat[dat$province == province[1],]
+d <- dat[dat$province =="함북",]
+d$day <- 0:(nrow(d)-1)
+
+i <- 1
+region <- pop$province_clean[i]
+pop_prov <- get_population_size(region = region)
+
+PARAMETERS <- params_init(I0=3, pop=pop_prov, erlang=TRUE)
+PARAMETERS$model <- sepiar_erlang_stoch
+PARAMETERS$measure_var <- c("CE", "CI")
+
+parest <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_9_seed_2_ryanggang_20230214T072651.rds")
+pars <- parest$param[!duplicated(parest$param),]
+apply(pars, 2, summary)
+
+set.seed(1)
+di <- daily_incidence(pars[i, ])
+
+set.seed(1)
+res <- run_model(pars=pars, outvar=c("CE", "CI"))
+tail(di)
+tail(res[[1]])
+tail(res[[2]])
+
+p <- plot_model_data(model=mod, data=d)
+p
+
+p <- p + labs(x="", y="Case")
+p
+```
+
+
