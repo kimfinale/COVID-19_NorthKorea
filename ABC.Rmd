@@ -271,6 +271,104 @@ for(i in 1:nrow(pop)){
 ```
 
 
+### Run the model using the estimated parameters
+```{r}
+devtools::load_all()
+
+dat <- readRDS("outputs/covid_overall_20230122.rds")
+pop <- readRDS("outputs/pop_by_province_20230213.rds")
+
+res <- readRDS("outputs/abc_alpha_0.8_tol_6_seed_5_20230215T153353.rds")
+pars <- res$param[!duplicated(res$param),]
+apply(pars, 2, summary)
+
+PARAMETERS <- params_init(pop=sum(pop$Total))
+var <- c("CE","CI")
+PARAMETERS$measure_var <- var
+## run_model changes PARAMETERS$measure_var
+res <- run_model(pars=pars, var=var)
+
+sim <- as.data.frame(t(apply(res[[2]], 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
+end_date <- dat$newdate[1] + PARAMETERS$obslength - 1
+start_date <- end_date - nrow(sim) + 1
+sim$date <- rev(seq(end_date, start_date, by=-1))
+```
+
+
+#### Plot: Model vs. data symptomatic 
+```{r}
+library(ggplot2)
+sb <- alpha(c("steelblue"), alpha = c(0.4, 0.7, 0.9))
+br <- alpha(c("brown"), alpha = c(0.5))
+
+p <- plot_model_data(model=sim, data=dat, var="symptomatic")
+p
+# ggsave(sprintf("plots/abc_fit%s.png", timestamp()), p, width=3.4*2, height=2.7*2)
+```
+
+
+#### Plot; Inc, Symptomatic
+```{r }
+# plot
+library(ggplot2)
+plt <- ggplot(inc_summary, aes(x=date)) +
+  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`), fill="steelblue", alpha=0.3) +
+  geom_ribbon(aes(ymax=`75%`,ymin=`25%`), fill="steelblue", alpha=0.6) +
+  geom_line(aes(y=`50%`), color="steelblue") +
+  geom_ribbon(data=totinc_summary, aes(x=date, ymax=`97.5%`,ymin=`2.5%`), fill="darkgreen", alpha=0.3, inherit.aes=F) +
+  geom_ribbon(data=totinc_summary, aes(x=date, ymax=`75%`,ymin=`25%`), fill="darkgreen", alpha=0.6, inherit.aes=F) +
+  geom_line(data=totinc_summary, aes(x=date, y=`50%`), color="darkgreen",
+            inherit.aes = F) +
+  geom_col(data=dnorth, aes(x=newdate, y=symptomatic), fill="brown", alpha=0.5,
+           inherit.aes = F) + 
+  theme_bw() +
+  labs(x="", y="Case") +
+  scale_x_date(date_breaks="1 week", date_labels="%Y-%m-%d",
+               limits=c(min(inc_summary$date), as.Date("2022-06-30"))) +
+  theme(axis.text.x=element_text(angle=60, hjust=1)) + 
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.8e6, ymax=2e6, alpha=0.3, fill="darkgreen") +
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.85e6, ymax=1.95e6, alpha=0.6, fill="darkgreen") +
+  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
+           y=1.9e6, yend=1.9e6, color="darkgreen") +
+  annotate("text", x = as.Date("2022-03-01"), y = 1.9e6, size = 4, 
+           label = "Infection (model)", hjust=0, vjust = 0.5) + 
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.55e6, ymax=1.75e6, alpha=0.3, fill="steelblue") +
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.6e6, ymax=1.7e6, alpha=0.6, fill="steelblue") +
+  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
+           y=1.65e6, yend=1.65e6, color="steelblue") +
+  annotate("text", x = as.Date("2022-03-01"), y = 1.65e6, size = 4, 
+           label = "Symptomatic (model)", hjust=0, vjust = 0.5)+
+  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
+           ymin=1.3e6, ymax=1.5e6, alpha=0.5, fill="brown") +
+  annotate("text", x = as.Date("2022-03-01"), y = 1.4e6, size = 4, 
+           label = "Symptomatic (data)", hjust=0, vjust = 0.5)
+plt
+
+# tstamp <- format(Sys.time(), "%Y%m%dT%H") 
+# ggsave(sprintf("plots/infection_symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

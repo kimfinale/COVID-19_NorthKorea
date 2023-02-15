@@ -1,19 +1,22 @@
-run_model <- function(pars, outvar) {
+run_model <- function(pars, var) {
   max_intro <- max(round(pars[,1])) # value for the earliest introduction
-  reslist <- vector('list', length(outvar))
-  PARAMETERS$measure_var <- outvar
+
+  reslist <- vector('list', length(var))
+  names(reslist) <- var
+
+  # PARAMETERS$measure_var <- var
 
   nobs <- max_intro + PARAMETERS$obslength
   np <- nrow(pars)
 
-  for(i in 1:length(outvar)) {
-    reslist[[i]] <- data.frame(matrix(NA, nrow=nobs, ncol=np))
+  for(j in 1:length(var)) {
+    reslist[[j]] <- data.frame(matrix(NA, nrow=nobs, ncol=np))
   }
-  names(reslist) <- outvar
+
   for (i in 1:np) {
     res <- daily_incidence(pars = pars[i,])
-    for(j in 1:length(outvar)) {
-      reslist[[j]][(nobs-nrow(res)+1):nobs, i] <- res[, outvar[j]]
+    for(j in 1:length(var)) {
+      reslist[[j]][(nobs-nrow(res)+1):nobs, i] <- res[, var[j]]
     }
   }
 

@@ -20,10 +20,10 @@ daily_incidence <- function(pars){
 
   # if measured variables is more than one
   df <- data.frame(matrix(NA, nrow=(nrow(out)-1), ncol=length(mv)))
+  names(df) <- mv
   for(i in 1:length(mv)){
     df[,i] <- diff(out[, mv[i]])
   }
-  names(df) <- mv
 
   return(df)
 }
