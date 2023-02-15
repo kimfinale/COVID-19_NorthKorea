@@ -6,7 +6,7 @@ params_init <- function(I0=3, pop=25970000, erlang=FALSE){
 
   params <- list() # input parameters for the SEIR model
   params$measure_var <- "CI" # daily diff of CI gives daily symptomatic case
-  params$model <- NULL
+  params$model <- sepiar_stoch
   # epsilon and gamma from Kim et al. (2021)
   params$epsilon <- 1/3 # mean latent period = 1/epsilon
   params$delta <- 1/5.2 # mean incubation period = 1/delta
@@ -33,8 +33,10 @@ params_init <- function(I0=3, pop=25970000, erlang=FALSE){
   params$init$CI <- y0[["CI"]]
 
   if (erlang) {
+    params$model <- sepiar_erlang_stoch
+    params$tau <- 0.2 # time step size
     params$init <- NULL
-    params$init$S <- pop
+    params$init$S <- pop-I0
     params$init$E1 <- 0
     params$init$E2 <- 0
     params$init$P1 <- 0

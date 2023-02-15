@@ -9,31 +9,270 @@ editor_options:
   chunk_output_type: console
 ---
 
-
-### ABC SMC
+### Package install
 ```{r}
-# devtools::load_all()
 # devtools::install()
-library(COVID19NorthKorea)
+# library(COVID19NorthKorea)
+devtools::load_all() #Ctrl-Shift-L
+```
 
-dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
-dnorth$day <- 0:(nrow(dnorth)-1)
+### Data
+```{r}
+# overall covid data
+covid_overall <- readRDS("outputs/covid_overall_20230122.rds")
+# population by province - used to set the initial province-specific population size
+pop <- readRDS("outputs/pop_by_province_20230213.rds")
+# covid case by province
+covid <- readRDS("outputs/covid_by_province_20230213.rds")
+```
+
+draw_params function is created to check if daily_incidence and get_sum_stat function generate valid output for different values of parameters
+```{r}
+prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
+              c("unif",0.1,2))
+
+PARAMETERS <- params_init(pop=sum(pop$Total))
+
+for(i in 1:10){
+  parm <- draw_params(prior)
+  message(parm)
+  daily_incidence(pars=parm)
+  get_sum_stat(pars=parm)
+}
+```
+
+
+
+```{r}
+dat <- readRDS("outputs/covid_overall_20230122.rds")
+pop <- readRDS("outputs/pop_by_province_20230213.rds")
+
+# Number of people who were already symptomatic before the first case was officially reported
+nsymp <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+
+# Model parameters
+# These are global parameters and name has to be PARAMETERS
+PARAMETERS <- params_init(pop=sum(pop$Total))
+# PARAMETERS$model <- sepiar_stoch
+# PARAMETERS$measure_var <- "CI" # to compare symptomatic case
+sum_stat_obs <- c(nsymp, dat$symptomatic[1:PARAMETERS$obslength])  
+
+testpars <- c(30, 6, 1, 0.6)
+di <- daily_incidence(pars=testpars)
+ssmodel <- get_sum_stat(pars=testpars)
+(length(sum_stat_obs)) 
+(length(ssmodel))
+
 library(EasyABC)
-prior = list(c("unif",10,200), c("unif",1,30))
-sum_stat_obs = c(350000, dnorth$symptomatic[1:4])
-nsim <- 100
-alpha <- 0.95
-# with alpha=0.8, 13 hours of run did not produce the fit, so alpha was increased to 0.95
-tol <- 0.19
+## ABC parameters
+prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
+              c("unif",0.1,2))
 
-set.seed(1)
-res <- ABC_sequential(method="Delmoral", model=get_sum_stat_sepiar,
-                 prior=prior, nb_simul=nsim,
-                 summary_stat_target=sum_stat_obs, alpha=alpha,
-                 tolerance_target=tol, verbose=F, M=3)
-res$param
+nsim <- 50
+alpha <- 0.8
+tol <- 20
+nrep <- 1                          
+
+set.seed(42)
+res <- ABC_sequential(method="Delmoral",
+                      model=get_sum_stat,
+                      prior=prior, 
+                      nb_simul=nsim,
+                      summary_stat_target=sum_stat_obs, 
+                      alpha=alpha,
+                      tolerance_target=tol, 
+                      verbose=F, 
+                      M=nrep)
+res
+
+## set time limit
+res <- run_with_timelimit(2, ABC_sequential(method="Delmoral",
+                      model=get_sum_stat,
+                      prior=prior, 
+                      nb_simul=nsim,
+                      summary_stat_target=sum_stat_obs, 
+                      alpha=alpha,
+                      tolerance_target=tol, 
+                      verbose=F, 
+                      M=nrep))
+res
+```
+
+### Fit overall COVID-19 epidemic
+
+if the day of introduction is extended to 300 days, the Delmoral method does not seem to converge. This may be that the early introduction of the infection generates a more complex scenario of potential two peaks, which makes exploring parameter space challenging
+
+We modeled the epidemic using four parameters.
+1. Time that the initial cases were imported
+2. Reproduction number before intervention efforts were in place (basic reproduction number)
+3. Time when the effects of intervention appeared
+4. Reproduction number after the intervention program
+
+We assume that the effect of intervention program instantaneously reaches its maximum.  
+```{r fit_overall}
+dat <- readRDS("outputs/covid_overall_20230122.rds")
+pop <- readRDS("outputs/pop_by_province_20230213.rds")
+
+# Number of people who were already symptomatic before the first case was officially reported
+nsymp <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+
+# Model parameters
+# These are global parameters and name has to be PARAMETERS
+PARAMETERS <- params_init(pop=sum(pop$Total))
+sum_stat_obs <- c(nsymp, dat$symptomatic[1:PARAMETERS$obslength])  
+
+testpars <- c(50, 6, 0, 0.6)
+di <- daily_incidence(pars=testpars)
+ssmodel <- get_sum_stat(pars=testpars)
+(length(sum_stat_obs)) 
+(length(ssmodel))
+
+library(EasyABC)
+## ABC parameters
+prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
+              c("unif",0.1,2))
+nsim <- 50
+alpha <- 0.8
+tol <- 10
+nrep <- 10                          
+timelim <- 10*60 # some runs can take long depending on the tol
+for (s in 1:9) {
+  message("seed = ", s)
+  set.seed(s)
+  res <-  run_with_timelimit(timelim, ABC_sequential(method="Delmoral",
+                        model=get_sum_stat,
+                        prior=prior, 
+                        nb_simul=nsim,
+                        summary_stat_target=sum_stat_obs, 
+                        alpha=alpha,
+                        tolerance_target=tol, 
+                        verbose=F, 
+                        M=nrep))
+  tstamp <- timestamp(hour=T, minute=T, second=T)
+  saveRDS(res, sprintf("outputs/abc_alpha_%s_tol_%s_seed_%s_%s.rds", alpha, tol, s, tstamp))
+  
+  if (is.null(res)) break;
+  tol <- tol - 1
+}
 
 ```
+
+### Erlang-distributed waiting time 
+```{r fit_overall_erlang}
+dat <- readRDS("outputs/covid_overall_20230122.rds")
+pop <- readRDS("outputs/pop_by_province_20230213.rds")
+
+nsymp <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+
+PARAMETERS <- params_init(pop=sum(pop$Total), erlang=TRUE)
+sum_stat_obs <- c(nsymp, dat$symptomatic[1:PARAMETERS$obslength])  
+
+# testpars <- c(50, 6, 0, 0.6)
+# di <- daily_incidence(pars=testpars)
+# ssmodel <- get_sum_stat(pars=testpars)
+# (length(sum_stat_obs)) 
+# (length(ssmodel))
+
+library(EasyABC)
+prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
+              c("unif",0.1,2))
+nsim <- 50
+alpha <- 0.8
+tol <- 10
+nrep <- 10                          
+timelim <- 10*60 # some runs can take long depending on the tol
+for (s in 1:9) {
+  cat("seed =", s, "\n")
+  set.seed(s)
+  res <-  run_with_timelimit(timelim, ABC_sequential(method="Delmoral",
+                        model=get_sum_stat,
+                        prior=prior, 
+                        nb_simul=nsim,
+                        summary_stat_target=sum_stat_obs, 
+                        alpha=alpha,
+                        tolerance_target=tol, 
+                        verbose=F, 
+                        M=nrep))
+  tstamp <- timestamp(hour=T, minute=T, second=T)
+  saveRDS(res, sprintf("outputs/abc_erlang_alpha_%s_tol_%s_seed_%s_%s.rds", alpha, tol, s, tstamp))
+  
+  if (is.null(res)) break;
+  tol <- tol - 1
+}
+```
+
+
+### Fit for each region
+```{r fit_region}
+devtools::load_all()
+pop <- readRDS("outputs/pop_by_province_20230213.rds")
+dat <- readRDS("outputs/covid_by_province_20230213.rds")
+
+replace_NA_with_previous <- function(x){
+  for(j in 2:length(x)){   
+    x[j] <- ifelse(is.na(x[j]), x[j-1], x[j]) 
+  }
+  return (x)
+}
+
+library(EasyABC)
+prior <- list(c("unif",5,150), c("unif",1,20), 
+              c("unif",-5,10), c("unif",0.1,2))
+
+nsim <- 50
+alpha <- 0.8
+tol <- 8
+nrep <- 10
+
+timelim <- 10*60 # 10 minutes
+# PARAMETERS
+model <- sepiar_erlang_stoch
+measure_var <- "CI"
+erlang <- TRUE  
+obslength <- 70
+
+for(i in 1:nrow(pop)){
+  d <- dat[dat$province == pop$Province_Korean[i],]
+  d$day <- 0:(nrow(d)-1)
+  # is this a reasonable assumption
+  case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
+  sum_stat_obs <- c(case_before, d$case[1:obslength])
+  sum_stat_obs <- replace_NA_with_previous(sum_stat_obs)
+  
+  # set the global variables ------------------
+  # initial population size by region
+  pop_prov <- get_population_size(region = pop$province_clean[i])
+  PARAMETERS <- params_init(I0=3, pop=pop_prov, erlang=erlang)
+  PARAMETERS$model <- model
+  PARAMETERS$measure_var <- measure_var
+  PARAMETERS$obslength <- obslength
+  # -----------------------------------------------
+  tol <- 10
+  
+  for (s in 1:9) {
+    cat("seed =", s, "\n")
+    set.seed(s)
+    res <- run_with_timelimit(timelim, ABC_sequential(method="Delmoral",
+                            model=get_sum_stat,
+                            prior=prior, nb_simul=nsim,                            summary_stat_target=sum_stat_obs, 
+                            alpha=alpha,
+                            tolerance_target=tol, verbose=F, M=nrep))
+      
+    tstamp <- timestamp(hour=T, minute=T, second=T)
+    saveRDS(res, 
+            sprintf("outputs/abc_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, pop$province_clean[i], tstamp))
+    
+    if (is.null(res)) break;
+    
+    tol <- tol - 1
+  }
+}
+
+```
+
+
+
+
 
 ### ABC SMC parallel using foreach 
 ```{r}
@@ -482,45 +721,6 @@ plt
 Two additional model parameters were introduced.
 Rt1, Rt2, d1, d2
 
-```{r}
-# devtools::install()
-# library(COVID19NorthKorea)
-devtools::load_all()
-```
-
-
-```{r}
-#      
-dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
-dnorth$day <- 0:(nrow(dnorth)-1)
-library(EasyABC)
-# if the day of introduction is extended to 300 days, the Delmoral method does not seem to converge. This may be that the early introduction of the infection generates a more complex scenario of potential two peaks, which makes exploring parameter space challenging
-prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
-              c("unif",0.1,2))
-parm <- params_init(erlang=TRUE)
-sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
-nsim <- 50
-alpha <- 0.8
-tol <- 10
-nrep <- 10
-# testpars <- c(50, 6, 0, 0.6)
-# get_sum_stat_sepiar_erlang(pars=testpars)
-# for(alpha in c(0.8,0.9,0.99)){
-   for (s in 1:9) {
-    message("seed = ", s)
-    set.seed(s)
-    res <- ABC_sequential(method="Delmoral",
-                          model=get_sum_stat_sepiar_erlang,
-                          prior=prior, nb_simul=nsim,
-                          summary_stat_target=sum_stat_obs, alpha=alpha,
-                          tolerance_target=tol, verbose=F, M=nrep)
-    tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-    saveRDS(res, sprintf("outputs/abc_4p_erlang_step_0p2_alpha_%s_tol_%s_seed_%s_%s.rds", alpha, tol, s, tstamp))
-    tol <- tol - 1
-  }
-# }
-```
-
 
 ### Run the model using the estimated params SEPIAR Erlang
 ```{r}
@@ -948,8 +1148,8 @@ ggplot(d)+
 ### Run using global variables
 ```{r}
 devtools::load_all()
-pop <- readRDS("outputs/pop_province_20230213.rds")
-dat <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
+pop <- readRDS("outputs/pop_by_province_20230213.rds")
+dat <- readRDS("outputs/covid_by_province_20230213.rds")
 # province_kor <- unique(dat$province)
 
 replace_NA_with_previous <- function(x){
@@ -969,11 +1169,13 @@ alpha <- 0.8
 nrep <- 10
 
 obslength <- 70
-timelimit <- 10*60 # 10 minutes
+timelimit <- 1*60 # 10 minutes
 
 model <- sepiar_erlang_stoch
 measure_var <- "CI"
 erlang <- TRUE  
+
+
 for(i in 1:nrow(pop)){
   d <- dat[dat$province == pop$Province_Korean[i],]
   d$day <- 0:(nrow(d)-1)
@@ -988,6 +1190,14 @@ for(i in 1:nrow(pop)){
   PARAMETERS <- params_init(I0=3, pop=pop_prov, erlang=erlang)
   PARAMETERS$model <- model
   PARAMETERS$measure_var <- measure_var
+  PARAMETERS$obslength <- obslength
+  
+  testpars <- c(50, 6, 0, 0.6)
+  di <- daily_incidence(pars=testpars)
+  ssmodel <- get_sum_stat(pars=testpars)
+  message(length(sum_stat_obs))
+  message(length(ssmodel))
+
   # -----------------------------------------------
   tol <- 5
   

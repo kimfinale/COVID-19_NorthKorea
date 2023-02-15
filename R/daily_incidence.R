@@ -14,15 +14,14 @@ daily_incidence <- function(pars){
   params$R0_2 <- pars[4] # number of days for o
 
   out <- params$model(params)
-  day_filter <- seq(1, by = round(1/params$tau), length.out = (params$ndays+1))
-  # out <- out[day_filter, params$measure_var]
-  # daily_inc <- diff(out)
+  day_filter <- seq(1, by=round(1/params$tau), length.out=(params$ndays+1))
+  mv <- params$measure_var
+  out <- out[day_filter, mv, drop=FALSE]
 
   # if measured variables is more than one
-  mv <- params$measure_var
   df <- data.frame(matrix(NA, nrow=(nrow(out)-1), ncol=length(mv)))
   for(i in 1:length(mv)){
-    df[,i] <- diff(out[day_filter, mv[i]])
+    df[,i] <- diff(out[, mv[i]])
   }
   names(df) <- mv
 

@@ -1,5 +1,5 @@
 get_population_size <- function(region) {
-  d <- readRDS("outputs/pop_province_20230213.rds")
+  d <- readRDS("outputs/pop_by_province_20230213.rds")
   if (region == "overall") {
     pop <- sum(d$Total)
   } else{
