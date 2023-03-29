@@ -1,12 +1,17 @@
-params_init <- function(I0=3, pop=25970000, erlang=FALSE){
+initialize_params <- function(I0=3, pop=25970000, erlang=FALSE, region="overall"){
   # 25970000 North Korea population size
   # since SEPIAR model is a stochastic model stochastic die-out possible
+  if(region != "overall"){
+    pop <- get_population_size(region)
+  }
   y0 <- c(S=pop-I0, E=0, P=0, A=0, I=I0, R=0, CE=0, CI=0)
   y0 <- round(y0) # make sure that the y0 are integers
 
   params <- list() # input parameters for the SEIR model
   params$measure_var <- "CI" # daily diff of CI gives daily symptomatic case
   params$model <- sepiar_stoch
+  params$erlang <- erlang
+  params$region <- region
   # epsilon and gamma from Kim et al. (2021)
   params$epsilon <- 1/3 # mean latent period = 1/epsilon
   params$delta <- 1/5.2 # mean incubation period = 1/delta
@@ -16,7 +21,7 @@ params_init <- function(I0=3, pop=25970000, erlang=FALSE){
   params$fA <- 0.306 # fraction of asymptomatic state
   params$bP <- 1 # relative infectiousness of pre-symptomatic state
   params$bA <- 1 # relative infectiousness of asymptomatic state
-  params$tau <- 1 # time step size
+  params$tau <- 0.1 # time step size
   params$ndays <- 100.0 # number of days for output
   params$day_intervention <- 100.0
   params$R0_2 <- 1.0 # fraction of R

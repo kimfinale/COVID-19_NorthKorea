@@ -9,21 +9,66 @@ editor_options:
   chunk_output_type: console
 ---
 
+```{r global_options, echo=F}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE, eval=FALSE)
+```
+
 ### Package install
 ```{r}
+# remove.packages("COVID19NorthKorea")
+# When earlier installation causes an issue, deleting the package folder under, C:\Users\jonghoon.kim\AppData\Local\R\win-library\4.2, solved.
 # devtools::install()
 # library(COVID19NorthKorea)
-devtools::load_all() #Ctrl-Shift-L
+# devtools::load_all() #Ctrl-Shift-L
 ```
 
 ### Data
 ```{r}
 # overall covid data
-covid_overall <- readRDS("outputs/covid_overall_20230122.rds")
+covid_overall <- readRDS("data/covid_overall_20230122.rds")
 # population by province - used to set the initial province-specific population size
-pop <- readRDS("outputs/pop_by_province_20230213.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
 # covid case by province
-covid <- readRDS("outputs/covid_by_province_20230213.rds")
+covid <- readRDS("data/covid_by_province_20230213.rds")
+
+library(ggplot2)
+df <- covid_overall
+p<-ggplot(df, aes(date, symptomatic))+
+  geom_col(fill="brown", alpha=0.5)+
+  theme_bw() +
+  labs(x="", y="Symptomatic case")+
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+               limits=c(min(df$date), max(df$date)))+
+  theme(axis.text.x=element_text(angle=60, hjust=1))
+p
+
+ggsave(sprintf("plots/covid_symptomatic_overall_%s.png", tstamp()), p, width=3.4*1.2, height=2.7*1.2)
+
+# 	당일 발생자수 소계	당일 완쾌자수 소계	당일 사망자 수 소계
+# 평양	608,063 	662,337 	12 
+# 평북	354,206 	388,616 	1 
+# 평남	425,965 	437,789 	5 
+# 황북	325,755 	340,737 	0 
+# 황남	359,760 	351,613 	3 
+# 자강	125,578 	156,617 	0 
+# 강원	225,445 	258,248 	7 
+# 함북	57,885 	76,775 	1 
+# 함남	245,487 	257,001 	2 
+# 양강	114,316 	129,966 	8 
+# 남포	133,089 	149,035 	0 
+# 나선	54,660 	64,317 	0 
+# 개성	87,039 	92,073 	1 
+# 조선중앙TV 소계	3,117,248 	3,365,124 	40 
+# 노동신문 총계	4,772,813 	4,772,739 	74 
+d = data.frame(recovered = c(662337,388616,437789,340737,351613,156617,258248,76775,257001,129966,149035,64317,92073),
+area = c("평양","평북","평남","황북","황남","자강","강원","함북","함남","양강","남포","나선","개성"))
+# d[order(d$area),]
+pop$area = pop$Province_Korean
+
+pop[order(pop$Province_Korean), c("Province_Korean", "Total")]
+library(dplyr)
+d2 = left_join(pop[,c("area","Total")], d, by="area")
+d2$attack_rate = d2$recovered/d2$Total
 ```
 
 draw_params function is created to check if daily_incidence and get_sum_stat function generate valid output for different values of parameters
@@ -44,33 +89,36 @@ for(i in 1:10){
 
 
 ```{r}
-dat <- readRDS("outputs/covid_overall_20230122.rds")
-pop <- readRDS("outputs/pop_by_province_20230213.rds")
-
+dat <- readRDS("data/covid_overall_20230122.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
+fit <- readRDS("outputs/smc_sepiar_euler_20230329T1338.rds")
 # Number of people who were already symptomatic before the first case was officially reported
-nsymp <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+unreported <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
 
 # Model parameters
 # These are global parameters and name has to be PARAMETERS
-PARAMETERS <- params_init(pop=sum(pop$Total))
-# PARAMETERS$model <- sepiar_stoch
+# PARAMETERS <- params_init(pop=sum(pop$Total))
+PARAMETERS <- initialize_params(pop=sum(pop$Total))
+PARAMETERS$model <- sepiar_stoch
+print_params(params=PARAMETERS)
 # PARAMETERS$measure_var <- "CI" # to compare symptomatic case
-sum_stat_obs <- c(nsymp, dat$symptomatic[1:PARAMETERS$obslength])  
+sum_stat_obs <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
 
-testpars <- c(30, 6, 1, 0.6)
+testpars <- c(33, 8.9, 2,5, 0.6)
+PARAMETERS$model <- sepiar_euler
+
 di <- daily_incidence(pars=testpars)
 ssmodel <- get_sum_stat(pars=testpars)
 (length(sum_stat_obs)) 
 (length(ssmodel))
-
+sqrt(sum(ssmodel - sum_stat_obs))
 library(EasyABC)
 ## ABC parameters
-prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
-              c("unif",0.1,2))
-
+prior <- list(c("unif",1,100), c("unif",1,20), c("unif",-10,20), 
+              c("unif",0.001,1))
 nsim <- 50
 alpha <- 0.8
-tol <- 20
+tol <- 2
 nrep <- 1                          
 
 set.seed(42)
@@ -83,7 +131,8 @@ res <- ABC_sequential(method="Delmoral",
                       tolerance_target=tol, 
                       verbose=F, 
                       M=nrep)
-res
+
+apply(res$param, 2, summary)
 
 ## set time limit
 res <- run_with_timelimit(2, ABC_sequential(method="Delmoral",
@@ -96,6 +145,19 @@ res <- run_with_timelimit(2, ABC_sequential(method="Delmoral",
                       verbose=F, 
                       M=nrep))
 res
+
+res = run_abc_with_decreasing_tol(method="Delmoral",
+                              timelimit=20*60, 
+                            init_tol=15, 
+                            decrement=0.2, 
+                            niter=15, 
+                            seed=i,
+                            prior=prior, 
+                            target=sum_stat_obs,
+                            model=get_sum_stat,
+                            nsim=30, 
+                            nrep=nrep, 
+                            alpha=alpha)
 ```
 
 ### Fit overall COVID-19 epidemic
@@ -108,10 +170,14 @@ We modeled the epidemic using four parameters.
 3. Time when the effects of intervention appeared
 4. Reproduction number after the intervention program
 
-We assume that the effect of intervention program instantaneously reaches its maximum.  
+We assume that the effect of intervention program instantaneously reaches its maximum.
+
+Estimate parameters for the SEPIAR model with tau of 1 day
+Start with 20 different random seeds (1 to 20) and combine the estimated parameters. Preliminary searches suggested that tolerance target of 5 gives reasonable fits. Starting with 5, the tolerance target was reduced by 0.2 increment. Simulation was run for 20 minutes for a given parameter values and stopped if the parameter sets did not converge.
+
 ```{r fit_overall}
-dat <- readRDS("outputs/covid_overall_20230122.rds")
-pop <- readRDS("outputs/pop_by_province_20230213.rds")
+dat <- readRDS("data/covid_overall_20230122.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
 
 # Number of people who were already symptomatic before the first case was officially reported
 nsymp <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
@@ -132,14 +198,16 @@ library(EasyABC)
 prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
               c("unif",0.1,2))
 nsim <- 50
-alpha <- 0.8
-tol <- 10
+alpha <- 0.9
+tol <- 5
 nrep <- 10                          
 timelim <- 10*60 # some runs can take long depending on the tol
-for (s in 1:9) {
-  message("seed = ", s)
-  set.seed(s)
-  res <-  run_with_timelimit(timelim, ABC_sequential(method="Delmoral",
+for (s in 1:20) {
+  cat("seed =", s, "\n")
+  for(r in 1:10){
+    set.seed(s)
+    cat("tol =", tol, "\n")
+    res <-  run_with_timelimit(timelim, ABC_sequential(method="Delmoral",
                         model=get_sum_stat,
                         prior=prior, 
                         nb_simul=nsim,
@@ -148,19 +216,190 @@ for (s in 1:9) {
                         tolerance_target=tol, 
                         verbose=F, 
                         M=nrep))
-  tstamp <- timestamp(hour=T, minute=T, second=T)
-  saveRDS(res, sprintf("outputs/abc_alpha_%s_tol_%s_seed_%s_%s.rds", alpha, tol, s, tstamp))
+    tstamp <- timestamp(hour=T, minute=T, second=T)
+    saveRDS(res, sprintf("outputs/abc_alpha_%s_tol_%s_seed_%s_%s.rds",
+                         alpha, tol, s, tstamp))
   
-  if (is.null(res)) break;
-  tol <- tol - 1
+    if (is.null(res)) break;
+    tol <- tol - 0.2
+  }
 }
+```
+
+
+### Run ABC with decreasing tolerance
+```{r}
+devtools::load_all()
+
+dat <- readRDS("data/covid_overall_20230122.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
+
+nsymp <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+
+# PARAMETERS <- params_init(pop=sum(pop$Total))
+PARAMETERS <- params_init(pop=sum(pop$Total), erlang=F)
+sum_stat_obs <- c(nsymp, dat$symptomatic[1:PARAMETERS$obslength])  
+
+library(EasyABC)
+## ABC parameters
+prior <- list(c("unif",5,150), c("unif",1,20),
+              c("unif",-5,10), 
+              c("unif",0.1,2))
+nsim <- 50
+alpha <- 0.9
+nrep <- 10                          
+
+tic <- Sys.time()
+
+nrun <- 50
+for(i in 41:nrun){
+  run_abc_with_decreasing_tol(method="Delmoral",
+                              timelimit=20*60, 
+                            init_tol=2.9, 
+                            decrement=0.2, 
+                            niter=15, 
+                            seed=i,
+                            prior=prior, 
+                            target=sum_stat_obs,
+                            model=get_sum_stat,
+                            nsim=nsim, 
+                            nrep=nrep, 
+                            alpha=alpha)
+}
+Sys.time() - tic
+```
+
+
+### Run ABC with decreasing tolerance - province
+```{r}
+devtools::load_all()
+pop <- readRDS("data/pop_by_province_20230213.rds")
+datall <- readRDS("data/covid_by_province_20230213.rds")
+
+replace_NA_with_previous <- function(x){
+  for(j in 2:length(x)){   
+    x[j] <- ifelse(is.na(x[j]), x[j-1], x[j]) 
+  }
+  return (x)
+}
+
+library(EasyABC)
+prior <- list(c("unif",0,100), c("unif",1,20), 
+              c("unif",-5,10), c("unif",0.1,5))
+
+nsim <- 50
+alpha <- 0.9
+nrep <- 10
+
+timelim <- 10*60 # 10 minutes
+# PARAMETERS
+measure_var <- "CI"
+erlang <- FALSE  
+obslength <- 70
+
+for(i in 1:nrow(pop)) {
+  dat <- datall[datall$province == pop$Province_Korean[i],]
+  dat$day <- 0:(nrow(dat)-1)
+  # is this a reasonable assumption
+  case_before <- dat$`치료중 환자수`[1] +
+    dat$`당일 완쾌자수`[1] - dat$`당일 발생자수`[1] 
+  sum_stat_obs <- c(case_before, dat$case[1:obslength])
+  sum_stat_obs <- replace_NA_with_previous(sum_stat_obs)
+  
+  # set the global variables ------------------
+  # initial population size by region
+  PARAMETERS <- params_init(I0=3, erlang=erlang,
+                            region=pop$province_clean[i])
+  PARAMETERS$measure_var <- measure_var
+  PARAMETERS$obslength <- obslength
+  # -----------------------------------------------
+  tol <- 10
+
+  nrun <- 15 # diffrent random seekds of nrun
+  for(i in 1:nrun){
+    run_abc_with_decreasing_tol(method="Delmoral",
+                                timelimit=20*60, 
+                                init_tol=0.02, 
+                                decrement=0.005, 
+                                niter=5, 
+                                seed=i,
+                                prior=prior, 
+                                target=sum_stat_obs,
+                                model=get_sum_stat,
+                                nsim=nsim, 
+                                nrep=nrep, 
+                                alpha=alpha)
+  }
+}
+```
+
+
+### Parallel with run_with_decrement
+```{r}
+
+# devtools::load_all()
+# devtools::install()
+library(COVID19NorthKorea)
+library(foreach)
+library(doParallel)
+
+dat <- readRDS("data/covid_overall_20230122.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
+
+nsymp <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+
+PARAMETERS <- params_init(pop=sum(pop$Total))
+sum_stat_obs <- c(nsymp, dat$symptomatic[1:PARAMETERS$obslength])  
+
+testpars <- c(50, 6, 0, 0.6)
+# di <- daily_incidence(pars=testpars)
+# ssmodel <- get_sum_stat(pars=testpars)
+# (length(sum_stat_obs)) 
+# (length(ssmodel))
+
+library(EasyABC)
+## ABC parameters
+prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
+              c("unif",0.1,2))
+nsim <- 50
+alpha <- 0.9
+tol <- 5
+nrep <- 10                          
+
+tic <- Sys.time()
+
+cl <- makeCluster(8)
+registerDoParallel(cl)
+
+resp <- foreach(i=1:8,
+                .packages=c("EasyABC", "COVID19NorthKorea"),
+                .combine = 'rbind') %dopar% {
+  # set.seed(i)
+  COVID19NorthKorea::run_abc_with_decreasing_tol(timelimit=1200, 
+                              init_tol=6, 
+                              decrement=0.2, 
+                              niter=10, 
+                              seed=i,
+                              prior=prior, 
+                              target=sum_stat_obs,
+                              model = get_sum_stat,
+                              nsim=nsim, 
+                              nrep=nrep, 
+                              alpha=alpha)
+                  
+}
+stopImplicitCluster()
+
+Sys.time() - tic
 
 ```
 
 ### Erlang-distributed waiting time 
 ```{r fit_overall_erlang}
-dat <- readRDS("outputs/covid_overall_20230122.rds")
-pop <- readRDS("outputs/pop_by_province_20230213.rds")
+devtools::load_all()
+
+dat <- readRDS("data/covid_overall_20230122.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
 
 nsymp <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
 
@@ -174,30 +413,35 @@ sum_stat_obs <- c(nsymp, dat$symptomatic[1:PARAMETERS$obslength])
 # (length(ssmodel))
 
 library(EasyABC)
-prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
-              c("unif",0.1,2))
+# prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
+#               c("unif",0.1,2))
+prior <- list(c("unif",5,100), c("unif",1,20), c("unif",-5,10), 
+              c("unif",0.1,1))
 nsim <- 50
-alpha <- 0.8
-tol <- 10
+alpha <- 0.9
+tol <- 9
 nrep <- 10                          
-timelim <- 10*60 # some runs can take long depending on the tol
-for (s in 1:9) {
-  cat("seed =", s, "\n")
+timelim <- 20*60 # some runs can take long depending on the tol
+for (s in 11:19) {
+  cat("seed =", s, ", tolerance_target =", tol,"\n")
   set.seed(s)
-  res <-  run_with_timelimit(timelim, ABC_sequential(method="Delmoral",
-                        model=get_sum_stat,
-                        prior=prior, 
-                        nb_simul=nsim,
-                        summary_stat_target=sum_stat_obs, 
-                        alpha=alpha,
-                        tolerance_target=tol, 
-                        verbose=F, 
-                        M=nrep))
-  tstamp <- timestamp(hour=T, minute=T, second=T)
-  saveRDS(res, sprintf("outputs/abc_erlang_alpha_%s_tol_%s_seed_%s_%s.rds", alpha, tol, s, tstamp))
+  res <-  run_with_timelimit(timelim, 
+                             ABC_sequential(method="Delmoral",
+                             model=get_sum_stat,
+                             prior=prior, 
+                             nb_simul=nsim,
+                             summary_stat_target=sum_stat_obs, 
+                             alpha=alpha,
+                             tolerance_target=tol, 
+                             verbose=F, 
+                             M=nrep))
+  # if (is.null(res)) break;
+  if (!is.null(res)) {
+    tstamp <- timestamp(hour=T, minute=T, second=T)
+    saveRDS(res, sprintf("outputs/abc_erlang_alpha_%s_tol_%s_seed_%s_%s.rds", alpha, tol, s, tstamp))
   
-  if (is.null(res)) break;
-  tol <- tol - 1
+    tol <- tol - 0.2
+  }
 }
 ```
 
@@ -205,8 +449,8 @@ for (s in 1:9) {
 ### Fit for each region
 ```{r fit_region}
 devtools::load_all()
-pop <- readRDS("outputs/pop_by_province_20230213.rds")
-dat <- readRDS("outputs/covid_by_province_20230213.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
+dat <- readRDS("data/covid_by_province_20230213.rds")
 
 replace_NA_with_previous <- function(x){
   for(j in 2:length(x)){   
@@ -271,289 +515,273 @@ for(i in 1:nrow(pop)){
 ```
 
 
+
+### Parameters
+
+```{r}
+fls_all <- list.files("outputs/", pattern="^abc_region_overall_erlang_FALSE_alpha_0.9_tol_.*_20230224.rds$", full.names = T)
+
+library(stringr)
+# str_extract(fls[1], ".*tol_[0-9+].*_seed.*")
+# number <- str_extract(fls[1], "(?<=tol\\_)\\d+\\.\\d+")
+extract_tol <- function(x){
+  str_extract(x, "(?<=tol\\_)\\d+\\.\\d+")
+}
+tols <- unlist(lapply(fls_all, function(x) extract_tol(x)))
+tols <- as.double(tols)
+# tols <- tols[order(tols)]
+cutoff <- quantile(tols, probs=0.90)
+
+fls <- fls_all[which(tols < cutoff)]
+
+reslist <- vector("list", length=length(fls))
+for(i in 1:length(reslist)) {
+  reslist[[i]] <- readRDS(fls[i])$param
+}
+
+pars <- do.call("rbind", reslist)
+pars <- pars[!duplicated(pars),]
+# pars <- pars[sample(1:nrow(pars), 200),]
+
+parm <- params_init()
+sum_stat_obs <- c(350000, dnorth$symptomatic[1:parm$obslength])
+# ddata <- sqrt(sum(sum_stat_obs^2))
+# # stats <- matrix(NA, nrow=nrow(pars), ncol=length(sum_stat_obs))
+# stats <- matrix(NA, nrow=nrow(pars), ncol=length(sum_stat_obs))
+# rmse <- matrix(NA, nrow=nrow(pars), ncol=1)
+# for(i in 1:nrow(pars)){
+#   stats[i,] <- get_sum_stat_sepiar2(pars[i,])
+#   rmse[i, ] <- sqrt(sum((stats[i,] - sum_stat_obs)^2)) / ddata
+# }
+```
+
+### Plot: parameter estimates
+```{r}
+library(ggplot2)
+# res <- readRDS("outputs/abc_4p_2023020300_seed_1.rds")
+# res <- readRDS("outputs/abc_4p_20_tol_20230206T073915_seed_2.rds")
+# pars <- res$param[!duplicated(res$param),]
+
+# reslist <- vector("list", length=9)
+# i <- 1
+# for(s in 12:20) {
+#   reslist[[i]] <- readRDS(sprintf("outputs/abc_4p_2023020500_seed_%s.rds", s))$param
+#   i <- i + 1
+# }
+# pars <- do.call("rbind", reslist)
+# pars <- pars[!duplicated(pars),]
+# pars <- pars[sample(1:nrow(pars), 200),]
+
+df <- as.data.frame(pars)
+names(df) <- c("t1", "R01","t2","R02")
+df2 <- df
+df2$t1 <- dat$date[1] - df$t1
+df2$t2 <- dat$date[1] + df$t2
+  
+library(GGally)
+ggpairs(df2,
+        upper = list(continuous = "density"),
+        lower = list(combo = "facetdensity"),
+        columnLabels = c("italic(t)[1]", "italic(R)[1]", "italic(t)[2]", "italic(R)[2]"),
+        labeller = "label_parsed") +
+  theme_bw()
+
+
+ggpairs(df2,
+        upper = list(continuous = "density"),
+        columnLabels = c("italic(t)[1]", "italic(R)[1]", "italic(t)[2]", "italic(R)[2]"),
+        labeller = "label_parsed") +
+  theme_bw()
+
+ggpairs(df2,
+        columnLabels = c("italic(t)[1]", "italic(R)[1]", "italic(t)[2]", "italic(R)[2]"),
+        labeller = "label_parsed") +
+  theme_bw()
+
+
+upperfun <- function(data,mapping){
+  ggplot(data = data, mapping = mapping)+
+    geom_density2d()
+}   
+
+lowerfun <- function(data,mapping){
+  ggplot(data = data, mapping = mapping)+
+    geom_point()
+}  
+
+p <- ggpairs(df2,upper = list(continuous = wrap(upperfun)),
+        lower = list(continuous = wrap(lowerfun)), 
+        columnLabels = c("italic(t)[1]", "italic(R)[1]", "italic(t)[2]", "italic(R)[2]"),
+        labeller = "label_parsed") +
+  theme_bw()
+g
+# ggsave(sprintf("plots/abc_params_%s.png", tstamp()), p, width=3.4*2, height=3.4*2)
+
+```
+
+### Parameter summary
+```{r}
+apply(pars, 2, quantile, probs=c(0.5, 0.025, 0.975) )
+# introduction 
+x <- quantile(df$t1, probs=c(0.025, 0.5, 0.975))
+dat$date[1] - round(x)
+# intervention 
+x <- quantile(df$t2, probs=c(0.025, 0.5, 0.975))
+dat$date[1] + round(x)
+# Ratio of R0
+intervention_impact <- 1 - df2[,"R02"] / df2[,"R01"]
+summary(intervention_impact)
+quantile(intervention_impact, probs=c(0.025, 0.5, 0.975))
+
+# create a summary table
+
+x <- data.frame()
+
+```
+
 ### Run the model using the estimated parameters
 ```{r}
 devtools::load_all()
 
-dat <- readRDS("outputs/covid_overall_20230122.rds")
-pop <- readRDS("outputs/pop_by_province_20230213.rds")
+dat <- readRDS("data/covid_overall_20230122.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
 
-res <- readRDS("outputs/abc_alpha_0.8_tol_6_seed_5_20230215T153353.rds")
-pars <- res$param[!duplicated(res$param),]
-apply(pars, 2, summary)
+# res <- readRDS("outputs/abc_alpha_0.9_tol_3.2_seed_13_20230216T142709.rds")
+# res <- readRDS("outputs/abc_region_overall_erlang_FALSE_alpha_0.9_tol_1.5_seed_2_20230223.rds")
+# pars <- res$param[!duplicated(res$param),]
+# apply(pars, 2, summary)
 
 PARAMETERS <- params_init(pop=sum(pop$Total))
 var <- c("CE","CI")
 PARAMETERS$measure_var <- var
 ## run_model changes PARAMETERS$measure_var
 res <- run_model(pars=pars, var=var)
+ci <- res$CI
+ce <- res$CE
+date_start <- dat$date[1] - max(pars[,1])
+ci$date <- seq(date_start, length.out=nrow(ci), by="day")
+## number of case before May 13
+ci_before <- ci[ci$date < dat$date[1],]
+X <- rep(NA, ncol(ci_before)-1)
+for(i in 1:(ncol(ci_before)-1)) {
+  X[i] <- sum(ci_before[,i], na.rm=T)  
+}
+quantile(X, probs=c(0.025, 0.5, 0.975))
 
-sim <- as.data.frame(t(apply(res[[2]], 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
-end_date <- dat$newdate[1] + PARAMETERS$obslength - 1
-start_date <- end_date - nrow(sim) + 1
-sim$date <- rev(seq(end_date, start_date, by=-1))
+ce_before <- ce[ci$date < dat$date[1],]
+X <- rep(NA, ncol(ce_before)-1)
+for(i in 1:(ncol(ce_before)-1)) {
+  X[i] <- sum(ce_before[,i], na.rm=T)  
+}
+quantile(X, probs=c(0.025, 0.5, 0.975))
+
+quantile(apply(ce, 2, sum, na.rm=T), probs=c(0.5, 0.025, 0.975))
+# quantile(apply(df, 2, sum, na.rm=T), probs=c(0.5, 0.025, 0.975))
+# summary table
+# 1.0% (95% CI: 1.0-3.0)
+cidf <- as.data.frame(ci[,1:(ncol(ci)-1)])
+# cfr_sample <- runif(ncol(cidf), min=0.1, max=10)
+cfr_sample <- 1
+# case fatality ratio (CFR) was assumed to be 1% based on the Johns Hopkins COVID-19 Dash board: globally 6,877,999 deaths out of 676,125,671 cases as of 7 March 2023 https://gisanddata.maps.arcgis.com/apps/dashboards/bda7594740fd40299423467b48e9ecf6
+
+cases <- apply(cidf, 2, sum, na.rm=T)
+deaths <- 0.01 * cfr_sample * cases
+quantile(deaths, probs=c(0.5, 0.025, 0.975))
+
+format_mean_95CI <- function(mean_lb_ub, digits) {
+  pred <- format(round(mean_lb_ub[[1]], digits=digits), big.mark=",", trim=TRUE)
+  lb <- format(round(mean_lb_ub[[2]], digits=digits), big.mark=",", trim=TRUE)
+  ub <- format(round(mean_lb_ub[[3]], digits=digits), big.mark=",", trim=TRUE)
+
+  paste0(pred, " (", lb , " - ", ub, ")")
+}
+
+sim <- summarize_model_output(model_output = res)
+head(sim)
 ```
 
 
-#### Plot: Model vs. data symptomatic 
+### Run the Erlang model using the estimated parameters
+```{r}
+devtools::load_all()
+
+dat <- readRDS("data/covid_overall_20230122.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
+
+res <- readRDS("outputs/abc_erlang_alpha_0.9_tol_9_seed_1_20230216T091250.rds")
+pars <- res$param[!duplicated(res$param),]
+apply(pars, 2, summary)
+
+PARAMETERS <- params_init(pop=sum(pop$Total), erlang=TRUE)
+var <- c("CE","CI")
+PARAMETERS$measure_var <- var
+## run_model changes PARAMETERS$measure_var
+res <- run_model(pars=pars, var=var)
+sim <- summarize_model_output(model_output = res)
+```
+
+### Run the Erlang model for each province
+```{r}
+devtools::load_all()
+datall <- readRDS("data/covid_by_province_20230213.rds")
+pop <- readRDS("data/pop_by_province_20230213.rds")
+(pop$province_clean)
+
+i <- 1
+res <- readRDS(paste0("outputs/abc_region_", pop$province_clean[i], "_erlang_FALSE_alpha_0.9_tol_0.5_seed_1_20230217.rds"))
+
+# res <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_9_seed_2_ryanggang_20230214T072651.rds")
+# res <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_2_seed_9_north_hamgyong_20230214T073738.rds")
+# res <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_5_seed_6_south_hamgyong_20230214T073823.rds")
+# res <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_5_seed_6_kangwon_20230214T075746.rds")
+# res <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_7_seed_4_jagang_20230214T080821.rds")
+# res <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_10_seed_1_north_pyongan_20230214T081943.rds")
+# res <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_7_seed_4_south_pyongan_20230214T083024.rds")
+
+pars <- res$param[!duplicated(res$param),]
+apply(pars, 2, summary)
+
+replace_NA_with_previous <- function(x){
+  for(j in 2:length(x)){   
+    x[j] <- ifelse(is.na(x[j]), x[j-1], x[j]) 
+  }
+  return (x)
+}
+
+obslength <- 70
+var <- c("CE", "CI")
+
+PARAMETERS <- params_init(I0=3, pop=pop_prov, region = pop$province_clean[i])
+PARAMETERS$obslength <- obslength
+PARAMETERS$measure_var <- var
+
+dat <- datall[datall$province == pop$Province_Korean[1],]
+# is this a reasonable assumption
+case_before <- dat$`치료중 환자수`[1] + dat$`당일 완쾌자수`[1] - dat$`당일 발생자수`[1] 
+sum_stat_obs <- c(case_before, dat$case[1:obslength])
+sum_stat_obs <- replace_NA_with_previous(sum_stat_obs)
+  
+## run_model changes PARAMETERS$measure_var
+res <- run_model(pars=pars, var=var)
+sim <- summarize_model_output(model_output = res)
+```
+
+
+#### Plot: Model vs. data 
 ```{r}
 library(ggplot2)
-sb <- alpha(c("steelblue"), alpha = c(0.4, 0.7, 0.9))
-br <- alpha(c("brown"), alpha = c(0.5))
-
-p <- plot_model_data(model=sim, data=dat, var="symptomatic")
+p <- plot_model_data(model=sim, data=dat, var="symp")
 p
 # ggsave(sprintf("plots/abc_fit%s.png", timestamp()), p, width=3.4*2, height=2.7*2)
-```
-
-
-#### Plot; Inc, Symptomatic
-```{r }
-# plot
-library(ggplot2)
-plt <- ggplot(inc_summary, aes(x=date)) +
-  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`), fill="steelblue", alpha=0.3) +
-  geom_ribbon(aes(ymax=`75%`,ymin=`25%`), fill="steelblue", alpha=0.6) +
-  geom_line(aes(y=`50%`), color="steelblue") +
-  geom_ribbon(data=totinc_summary, aes(x=date, ymax=`97.5%`,ymin=`2.5%`), fill="darkgreen", alpha=0.3, inherit.aes=F) +
-  geom_ribbon(data=totinc_summary, aes(x=date, ymax=`75%`,ymin=`25%`), fill="darkgreen", alpha=0.6, inherit.aes=F) +
-  geom_line(data=totinc_summary, aes(x=date, y=`50%`), color="darkgreen",
-            inherit.aes = F) +
-  geom_col(data=dnorth, aes(x=newdate, y=symptomatic), fill="brown", alpha=0.5,
-           inherit.aes = F) + 
-  theme_bw() +
-  labs(x="", y="Case") +
-  scale_x_date(date_breaks="1 week", date_labels="%Y-%m-%d",
-               limits=c(min(inc_summary$date), as.Date("2022-06-30"))) +
-  theme(axis.text.x=element_text(angle=60, hjust=1)) + 
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.8e6, ymax=2e6, alpha=0.3, fill="darkgreen") +
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.85e6, ymax=1.95e6, alpha=0.6, fill="darkgreen") +
-  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
-           y=1.9e6, yend=1.9e6, color="darkgreen") +
-  annotate("text", x = as.Date("2022-03-01"), y = 1.9e6, size = 4, 
-           label = "Infection (model)", hjust=0, vjust = 0.5) + 
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.55e6, ymax=1.75e6, alpha=0.3, fill="steelblue") +
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.6e6, ymax=1.7e6, alpha=0.6, fill="steelblue") +
-  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
-           y=1.65e6, yend=1.65e6, color="steelblue") +
-  annotate("text", x = as.Date("2022-03-01"), y = 1.65e6, size = 4, 
-           label = "Symptomatic (model)", hjust=0, vjust = 0.5)+
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.3e6, ymax=1.5e6, alpha=0.5, fill="brown") +
-  annotate("text", x = as.Date("2022-03-01"), y = 1.4e6, size = 4, 
-           label = "Symptomatic (data)", hjust=0, vjust = 0.5)
-plt
-
-# tstamp <- format(Sys.time(), "%Y%m%dT%H") 
-# ggsave(sprintf("plots/infection_symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
+p <- plot_model_data(model=sim, data=dat, var="inf")
+p
+# ggsave(sprintf("plots/abc_fit_inf_symp_%s.png", timestamp()), p, width=3.4*2, height=2.7*2)
 ```
 
 
 
+### Parallel using foreach
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-### ABC SMC parallel using foreach 
-```{r}
-# devtools::load_all()
-# devtools::install()
-library(COVID19NorthKorea)
-library(foreach)
-library(doParallel)
-
-dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
-dnorth$day <- 0:(nrow(dnorth)-1)
-library(EasyABC)
-prior = list(c("unif",10,200), c("unif",1,30))
-sum_stat_obs = c(350000, dnorth$symptomatic[1:4])
-nsim <- 100
-alpha <- 0.95
-# with alpha=0.8, 13 hours of run did not produce the fit, so alpha was increased to 0.95
-tol <- 0.09
-
-
-tic <- Sys.time()
-
-cl <- makeCluster(8)
-registerDoParallel(cl)
-
-resp <- foreach(i=1:8,
-                .packages=c("EasyABC", "COVID19NorthKorea")) %dopar% {
-  set.seed(i)
-  # seed has a big impact on the performance of the algorithm.
-  # set.seed(1..9) works fine.   
-  # set.seed(10) doesn't seem to be generating an converging simulation ..          
-  EasyABC::ABC_sequential(method="Delmoral",
-                          model=COVID19NorthKorea::get_sum_stat_sepiar,
-                          prior=prior, nb_simul=nsim,
-                          summary_stat_target=sum_stat_obs, alpha=alpha,
-                          tolerance_target=tol, verbose=F, M=5)
-}
-stopImplicitCluster()
-
-Sys.time() - tic
-
-```
-
-
-
-
-# Run the model using the params
-```{r}
-rngseed <- 2
-set.seed(rngseed)
-dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
-
-dnorth$day <- 0:(nrow(dnorth)-1)
-
-Rcpp::sourceCpp("src/sepiar_stoch.cpp")
-source("src/params_init.R")
-  
-res <- readRDS("outputs/res_abc_20230127.rds")
-pars <- res$param[!duplicated(res$param),]
-
-params <- params_init()
-maxd <- max(round(pars[1,])) # maximum value 
-
-incmat <- matrix(NA, nrow=(maxd + 5), ncol=nrow(pars))
-for (i in 1:nrow(pars)) {
-  eps <- maxd - round(pars[i, 1])
-  params$ndays <- round(pars[i, 1]) + 5 # number of days for output
-  params$R0 <- pars[i, 2] # number of days for output
-  out <- sepiar_stoch(params)
-  day_filter <- seq(1, by=round(1/params$tau), length.out=params$ndays)
-  out <- out[day_filter, "CI"]
-  dayinc <- diff(out)
-  incmat[(2+eps):nrow(incmat), i] <- dayinc
-}
-inc_summary <- as.data.frame(t(apply(incmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
-
-inc_summary$day <- 0:(nrow(inc_summary)-1)
-inc_summary$date <- seq(as.Date("2022-05-13") - nrow(inc_summary) + 4, 
-                        as.Date("2022-05-13") + 3, by="day")
-
-  
-dnorth_daystart <- max(inc_summary$day)-4 # last for days were used for fitting
-dnorth$day <- dnorth$day + dnorth_daystart
-
-# # plot
-# library(ggplot2)
-# plt <- ggplot(inc_summary, aes(x=date)) +
-#   geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`), fill="steelblue", alpha=0.3) + 
-#   geom_ribbon(aes(ymax=`75%`,ymin=`25%`), fill="steelblue", alpha=0.6) +
-#   geom_line(aes(y=`50%`), color="steelblue") + 
-#   geom_col(data=dnorth, aes(x=newdate, y=symptomatic), fill="brown", alpha=0.5, 
-#            inherit.aes = F) + theme_bw() + 
-#   labs(x="", y="Symptomatic cases") +
-#   scale_x_date(date_breaks="1 week", date_labels="%Y-%m-%d", 
-#                limits=c(min(inc_summary$date), as.Date("2022-06-30"))) +
-#   theme(axis.text.x=element_text(angle=60, hjust=1))
-# 
-# ggsave("plots/symptom_abc.png", plt, width=3.4*2, height=2.7*2)
-```
-
-### Rt change model
-Two additional model parameters were introduced.
-Rt1, Rt2, d1, d2
-
-```{r}
-# 
-# devtools::install()
-# devtools::load_all()
-# library(COVID19NorthKorea)
-
-devtools::load_all()
-# 
-dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
-dnorth$day <- 0:(nrow(dnorth)-1)
-library(EasyABC)
-prior = list(c("unif",15,150), c("unif",1,30), c("unif",-5,10), c("unif",0.1,2))
-parm <- params_init()
-sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
-nsim <- 50
-alpha <- 0.8
-# with alpha=0.8, 13 hours of run did not produce the fit, so alpha was increased to 0.95
-tol <- 6
-# testpars <- c(50, 6, 0, 0.6) 
-# get_sum_stat_sepiar2(pars=testpars)
-for (s in 3:12) {
-  message("seed = ", s)
-  set.seed(s)
-  res <- ABC_sequential(method="Delmoral", model=get_sum_stat_sepiar2,
-                   prior=prior, nb_simul=nsim,
-                   summary_stat_target=sum_stat_obs, alpha=alpha,
-                   tolerance_target=tol, verbose=F, M=5)
-  # head(res$param)
-  tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-  saveRDS(res, sprintf("outputs/abc_4p_%s_tol_%s_seed_%s.rds", tol, tstamp, s))
-  tol <- tol - 0.5
-}
-```
-
-### Run for 10 minutes for each seed for RNG
-The sampling varies by the random seed. 
-```{r}
-devtools::load_all()
-
-library(EasyABC)
-
-dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
-dnorth$day <- 0:(nrow(dnorth)-1)
-prior = list(c("unif",10,300), c("unif",1,30), c("unif",-10,30), c("unif",0.1,10))
-parm <- params_init()
-sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
-nsim <- 200
-alpha <- 0.9
-
-tol <- 1.1
-
-run_abc_seed <- function(seed, tol=1.1){
-  set.seed(seed)
-  res <- ABC_sequential(method="Delmoral", model=get_sum_stat_sepiar2,
-                   prior=prior, nb_simul=nsim,
-                   summary_stat_target=sum_stat_obs, alpha=alpha,
-                   tolerance_target=tol, verbose=F, M=3)
-  tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-  saveRDS(res, sprintf("outputs/abc_4p_%s_seed_%s.rds", tstamp, seed))
-}
-
-  
-
-library(R.utils)
-timelimit <- 10 # in seconds
-tol <- 2
-for(i in 1:10) {
-  cat("i =", i, "\n")
-  msg <- withTimeout({run_abc_seed(seed=i, tol=tol)}, 
-                     timeout=timelimit, onTimeout="warning")
-  if(is.null(msg)){
-    tol <- tol + i
-  }
-}
-
-
-
-
-```
 
 ```{r}
 apply(res$param, 2, summary)
@@ -588,39 +816,6 @@ saveRDS(resp, sprintf("outputs/abc_4p_pl_%s.rds", tstamp))
 ```
 
 
-#### Plot: parameter estimates
-```{r}
-library(ggplot2)
-# res <- readRDS("outputs/abc_4p_2023020300_seed_1.rds")
-# res <- readRDS("outputs/abc_4p_20_tol_20230206T073915_seed_2.rds")
-# pars <- res$param[!duplicated(res$param),]
-
-reslist <- vector("list", length=9)
-i <- 1
-for(s in 12:20) {
-  reslist[[i]] <- readRDS(sprintf("outputs/abc_4p_2023020500_seed_%s.rds", s))$param
-  i <- i + 1
-}
-pars <- do.call("rbind", reslist)
-pars <- pars[!duplicated(pars),]
-pars <- pars[sample(1:nrow(pars), 200),]
-
-df <- as.data.frame(pars)
-names(df) <- c("d1", "R01","d2","R02")
-
-library("bayesplot")
-color_scheme_set("red")
-p <- mcmc_pairs(df, pars = names(df),
-            labels = c(expression(italic(d)[1]),
-                       expression(italic(R)[paste(0, ",", 1)]),
-                       expression(italic(d)[2]),
-                       expression(italic(R)[paste(0, ",", 2)])),  
-            off_diag_args = list(size = 2, alpha = 1/3))
-p
-# tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S") 
-# ggsave(sprintf("plots/abc_params_%s.png", tstamp), p, width=3.4*2, height=3.4*2)
-
-```
 
 #### Parameter combine
 
@@ -645,9 +840,9 @@ for(i in 1:nrow(pars)){
   stats[i,] <- get_sum_stat_sepiar2(pars[i,])
   rmse[i, ] <- sqrt(sum((stats[i,] - sum_stat_obs)^2)) / ddata
 }
-
-
 ```
+
+
 
 ```{r}
 
@@ -658,256 +853,25 @@ for(i in 1:nrow(pars)){
 
 library(ggplot2)
 df <- as.data.frame(pars)
-names(df) <- c("d1", "R01","d2","R02")
+names(df) <- c("t1", "R01","t2","R02")
 
 library("bayesplot")
 color_scheme_set("red")
-mcmc_pairs(df, pars = c("d1", "R01","d2","R02"),
+mcmc_pairs(df, pars = c("t1", "R01","t2","R02"),
            off_diag_args = list(size = 1.5))
 
 plt <- mcmc_pairs(df, pars = names(df),
-            labels = c(expression(italic(d)[1]),
+            labels = c(expression(italic(t)[1]),
                        expression(italic(R)[paste(0, ",", 1)]),
-                       expression(italic(d)[2]),
+                       expression(italic(t)[2]),
                        expression(italic(R)[paste(0, ",", 2)])),  
             off_diag_args = list(size = 2, alpha = 1/3))
 plt
-tstamp <- format(Sys.time(), "%Y%m%dT%H") 
-ggsave(sprintf("plots/abc_params_%s.png", tstamp), plt, width=3.4*2, height=3.4*2)
+
+ggsave(sprintf("plots/abc_params_%s.png", tstamp()), plt, width=3.4*2, height=3.4*2)
 
 ```
 
-
-
-# Run the model using the estimated params 2
-```{r}
-devtools::load_all()
-# devtools::install()
-# library(COVID19NorthKorea)
-dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
-dnorth$day <- 0:(nrow(dnorth)-1)
-
-# res <- readRDS("outputs/abc_4p_2023020300_seed_1.rds")
-res <- readRDS("outputs/abc_4p_3.5_tol_20230209T103752_seed_8.rds")
-pars <- res$param[!duplicated(res$param),]
-
-# reslist <- vector("list", length=9)
-# i <- 1
-# for(s in 12:20) {
-#   reslist[[i]] <- readRDS(sprintf("outputs/abc_4p_2023020500_seed_%s.rds", s))$param
-#   i <- i + 1
-# }
-# pars <- do.call("rbind", reslist)
-# pars <- pars[!duplicated(pars),]
-# pars <- pars[sample(1:nrow(pars), 200),]
-
-
-params <- params_init()
-maxd <- max(ceiling(pars[,1])) # maximum value 
-
-incmat <- matrix(NA, nrow=(maxd + params$obslength), ncol=nrow(pars))
-totincmat <- incmat
-for (i in 1:nrow(pars)) {
-  # cat("i = ", i, "\n")
-  eps <- maxd - ceiling(pars[i, 1])
-  params$ndays <- ceiling(pars[i, 1]) + params$obslength # number of days for output
-  params$R0 <- pars[i, 2] # number of days for output
-  params$day_intervention <- ceiling(pars[i, 1]) + pars[i, 3] # number of days for output
-  params$R0_2 <- pars[i, 4]
-  
-  out <- sepiar_stoch(params)
-  day_filter <- seq(1, by=ceiling(1/params$tau), length.out=params$ndays)
-  incmat[(eps+2):nrow(incmat), i] <- diff(out[day_filter, "CI"]) # daily symptomatic
-  totincmat[(eps+2):nrow(incmat), i] <- diff(out[day_filter, "CE"])
-}
-inc_summary <- as.data.frame(t(apply(incmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
-totinc_summary <- as.data.frame(t(apply(totincmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
-
-inc_summary$day <- 0:(nrow(inc_summary)-1)
-# inc_summary$date <- seq(as.Date("2022-05-13") - nrow(inc_summary) + 4, 
-#                         as.Date("2022-05-13") + 3, by="day")
-inc_summary$date <- seq(as.Date("2022-05-13") - maxd, 
-                        as.Date("2022-05-13") + params$obslength - 1, by="day")
-
-totinc_summary$day <- inc_summary$day
-totinc_summary$date <- inc_summary$date
-
-
-dnorth$day <- dnorth$day + maxd
-```
-
-#### Plot: Model vs. data symptomatic 
-```{r}
-library(ggplot2)
-plt <- ggplot(inc_summary, aes(x=date)) +
-  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`), fill="steelblue", alpha=0.3) +
-  geom_ribbon(aes(ymax=`75%`,ymin=`25%`), fill="steelblue", alpha=0.6) +
-  geom_line(aes(y=`50%`), color="steelblue") +
-  geom_col(data=dnorth, aes(x=newdate, y=symptomatic), fill="brown", alpha=0.5,
-           inherit.aes = F) + 
-  theme_bw() +
-  labs(x="", y="Case") +
-  scale_x_date(date_breaks="1 week", date_labels="%Y-%m-%d",
-               limits=c(min(inc_summary$date), as.Date("2022-06-30"))) +
-  theme(axis.text.x=element_text(angle=60, hjust=1)) + 
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=0.55e6, ymax=0.75e6, alpha=0.3, fill="steelblue") +
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=0.6e6, ymax=0.7e6, alpha=0.6, fill="steelblue") +
-  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
-           y=0.65e6, yend=0.65e6, color="steelblue") +
-  annotate("text", x = as.Date("2022-03-01"), y = 0.65e6, size = 4, 
-           label = "Symptomatic (model)", hjust=0, vjust = 0.5)+
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=0.3e6, ymax=0.5e6, alpha=0.5, fill="brown") +
-  annotate("text", x = as.Date("2022-03-01"), y = 0.4e6, size = 4, 
-           label = "Symptomatic (data)", hjust=0, vjust = 0.5)
-plt
-
-# tstamp <- format(Sys.time(), "%Y%m%dT%H") 
-# ggsave(sprintf("plots/symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
-```
-
-
-#### Plot; Inc, Symptomatic
-```{r }
-# plot
-library(ggplot2)
-plt <- ggplot(inc_summary, aes(x=date)) +
-  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`), fill="steelblue", alpha=0.3) +
-  geom_ribbon(aes(ymax=`75%`,ymin=`25%`), fill="steelblue", alpha=0.6) +
-  geom_line(aes(y=`50%`), color="steelblue") +
-  geom_ribbon(data=totinc_summary, aes(x=date, ymax=`97.5%`,ymin=`2.5%`), fill="darkgreen", alpha=0.3, inherit.aes=F) +
-  geom_ribbon(data=totinc_summary, aes(x=date, ymax=`75%`,ymin=`25%`), fill="darkgreen", alpha=0.6, inherit.aes=F) +
-  geom_line(data=totinc_summary, aes(x=date, y=`50%`), color="darkgreen",
-            inherit.aes = F) +
-  geom_col(data=dnorth, aes(x=newdate, y=symptomatic), fill="brown", alpha=0.5,
-           inherit.aes = F) + 
-  theme_bw() +
-  labs(x="", y="Case") +
-  scale_x_date(date_breaks="1 week", date_labels="%Y-%m-%d",
-               limits=c(min(inc_summary$date), as.Date("2022-06-30"))) +
-  theme(axis.text.x=element_text(angle=60, hjust=1)) + 
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.8e6, ymax=2e6, alpha=0.3, fill="darkgreen") +
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.85e6, ymax=1.95e6, alpha=0.6, fill="darkgreen") +
-  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
-           y=1.9e6, yend=1.9e6, color="darkgreen") +
-  annotate("text", x = as.Date("2022-03-01"), y = 1.9e6, size = 4, 
-           label = "Infection (model)", hjust=0, vjust = 0.5) + 
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.55e6, ymax=1.75e6, alpha=0.3, fill="steelblue") +
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.6e6, ymax=1.7e6, alpha=0.6, fill="steelblue") +
-  annotate("segment", x=as.Date("2022-02-26"), xend=as.Date("2022-02-28"),
-           y=1.65e6, yend=1.65e6, color="steelblue") +
-  annotate("text", x = as.Date("2022-03-01"), y = 1.65e6, size = 4, 
-           label = "Symptomatic (model)", hjust=0, vjust = 0.5)+
-  annotate("rect", xmin=as.Date("2022-02-26"), xmax=as.Date("2022-02-28"),
-           ymin=1.3e6, ymax=1.5e6, alpha=0.5, fill="brown") +
-  annotate("text", x = as.Date("2022-03-01"), y = 1.4e6, size = 4, 
-           label = "Symptomatic (data)", hjust=0, vjust = 0.5)
-plt
-
-# tstamp <- format(Sys.time(), "%Y%m%dT%H") 
-# ggsave(sprintf("plots/infection_symptom_abc_%s.png", tstamp), plt, width=3.4*2, height=2.7*2)
-```
-
-
-### 4 parameters, SEPIAR Erlang distributed model
-Two additional model parameters were introduced.
-Rt1, Rt2, d1, d2
-
-
-### Run the model using the estimated params SEPIAR Erlang
-```{r}
-# res <- readRDS("outputs/abc_4p_erlang_19_tol_20230206T225544_seed_20.rds")
-devtools::load_all()
-# res <- readRDS("outputs/abc_4p_erlang_9_tol_20230207T061715_seed_7.rds")
-# res <- readRDS("outputs/abc_4p_erlang_step_0p2_tol_8_seed_1_20230207T064925.rds")
-# res <- readRDS("outputs/abc_4p_erlang_step_0p2_tol_6.5_seed_4_20230207T074421.rds")
-res <- readRDS("outputs/abc_4p_erlang_step_0p2_tol_8_seed_1_20230207T064925.rds")
-pars <- res$param[!duplicated(res$param),]
-
-apply(pars, 2, summary)
-params <- params_init(erlang=TRUE)
-params$tau <- 0.2
-maxd <- max(round(pars[,1])) # maximum value 
-incmat <- matrix(NA, nrow=(maxd + params$obslength), ncol=nrow(pars))
-totincmat <- incmat
-
-for (i in 1:nrow(pars)) {
-  # cat("i = ", i, "\n")
-  eps <- maxd - round(pars[i, 1])
-  params$ndays <- round(pars[i, 1]) + params$obslength + 1 # number of days for output
-  params$R0 <- pars[i, 2] # number of days for output
-  params$day_intervention <- round(pars[i, 1]) + round(pars[i, 3]) # number of days for output
-  params$R0_2 <- pars[i, 4]
-  
-  out <- sepiar_erlang_stoch(params)
-  day_filter <- seq(1, by=ceiling(1/params$tau), length.out=params$ndays)
-  incmat[(eps+1):nrow(incmat), i] <- diff(out[day_filter, "CI"]) # daily symptomatic
-  totincmat[(eps+1):nrow(incmat), i] <- diff(out[day_filter, "CE"])
-}
-
-inc_summary <- as.data.frame(t(apply(incmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
-totinc_summary <- as.data.frame(t(apply(totincmat, 1, quantile, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)))
-
-inc_summary$day <- 0:(nrow(inc_summary)-1)
-# inc_summary$date <- seq(as.Date("2022-05-13") - nrow(inc_summary) + 4, 
-#                         as.Date("2022-05-13") + 3, by="day")
-inc_summary$date <- seq(as.Date("2022-05-13") - maxd, 
-                        as.Date("2022-05-13") + params$obslength - 1, by="day")
-
-totinc_summary$day <- inc_summary$day
-totinc_summary$date <- inc_summary$date
-
-dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
-dnorth$day <- 0:(nrow(dnorth)-1)
-dnorth$day <- dnorth$day + maxd
-
-```
-
-### Euler, Erlang, 4 parameters,
-Two additional model parameters were introduced.
-Rt1, Rt2, d1, d2
-
-```{r}
-# devtools::install()
-# library(COVID19NorthKorea)
-devtools::load_all()
-```
-
-```{r}
-dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
-dnorth$day <- 0:(nrow(dnorth)-1)
-library(EasyABC)
-prior <- list(c("unif", 5, 60), c("unif",1, 20), c("unif",-5,10), 
-              c("unif", 0.1, 1))
-parm <- params_init(erlang=TRUE)
-sum_stat_obs = c(350000, dnorth$symptomatic[1:parm$obslength])
-nsim <- 50
-alpha <- 0.8
-tol <- 5.0
-nrep <- 1 # no repeat is necessary for the ODE model
-testpars <- c(40, 6, 0, 0.6) 
-get_sum_stat_sepiar_erlang_euler(pars=testpars)
-# for(alpha in c(0.8,0.9,0.99)){
-for (s in 1:20) {
-  message("seed = ", s)
-  set.seed(s)
-  res <- ABC_sequential(method="Delmoral",
-                        model=get_sum_stat_sepiar_erlang_euler,
-                        prior=prior, nb_simul=nsim,
-                        summary_stat_target=sum_stat_obs, alpha=alpha,
-                        tolerance_target=tol, verbose=F, M=nrep)
-  tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-  saveRDS(res, sprintf("outputs/abc_4p_erlang_euler_alpha_%s_tol_%s_seed_%s_%s.rds", alpha, tol, s, tstamp))
-  tol <- tol - 0.2
-}
-# }
-```
 
 
 ### Beaumont method 
@@ -984,390 +948,107 @@ p
 # ggsave(sprintf("plots/epidemic_curve_%s.png", tstamp), p, width=3.4*3, height=2.7*3)
 ```
 
-### Parameter estimation by region
-Set the population size correct for the province
-Set the size of the population who is already infected before May 14
-
+### ABC SMC parallel using foreach 
 ```{r}
-devtools::load_all()
+# devtools::load_all()
+# devtools::install()
+library(COVID19NorthKorea)
+library(foreach)
+library(doParallel)
 
-df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
-province <- unique(df$province)
-for(i in 1:length(province)){
-  message(nrow(df[df$province == province[i],]))
-}
+dnorth <- readRDS("outputs/NorthKorea_dat_20230122.rds")
+dnorth$day <- 0:(nrow(dnorth)-1)
 library(EasyABC)
-prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
-              c("unif",0.1,2))
-parm <- params_init(erlang=TRUE)
-nsim <- 50
-alpha <- 0.8
-tol <- 8
-nrep <- 10
+prior = list(c("unif",10,200), c("unif",1,30))
+sum_stat_obs = c(350000, dnorth$symptomatic[1:4])
+nsim <- 100
+alpha <- 0.95
+# with alpha=0.8, 13 hours of run did not produce the fit, so alpha was increased to 0.95
+tol <- 0.09
 
-obslength <- 70
-#obslength is also defined as 70 in the get_sum_stat_sepiar_erlang_province
-for(i in 1:length(province)){
-  d <- df[df$province == province[i],]
-  d$day <- 0:(nrow(d)-1)
-  # is this a reasonable assumption
-  case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
-  sum_stat_obs <- c(case_before, d$case[1:obslength])
-  # -----------------------------
-  # does NA cause problems? Let's remove NA's and test
-  for (j in 2:length(sum_stat_obs)){
-    sum_stat_obs[j] <- ifelse(is.na(sum_stat_obs[j]), sum_stat_obs[j-1], sum_stat_obs[j]) 
-  }
-  #-------------------------------
-  for (s in 1:9) {
-    cat("seed =", s, "\n")
-    set.seed(s)
-    res <- ABC_sequential(method="Delmoral",
-                          model=get_sum_stat_sepiar_erlang_province,
+
+tic <- Sys.time()
+
+cl <- makeCluster(8)
+registerDoParallel(cl)
+
+resp <- foreach(i=1:8,
+                .packages=c("EasyABC", "COVID19NorthKorea")) %dopar% {
+  set.seed(i)
+  # seed has a big impact on the performance of the algorithm.
+  # set.seed(1..9) works fine.   
+  # set.seed(10) doesn't seem to be generating an converging simulation ..          
+  EasyABC::ABC_sequential(method="Delmoral",
+                          model=COVID19NorthKorea::get_sum_stat,
                           prior=prior, nb_simul=nsim,
                           summary_stat_target=sum_stat_obs, 
                           alpha=alpha,
-                          tolerance_target=tol, verbose=F, M=nrep)
-    tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-    saveRDS(res, 
-            sprintf("outputs/abc_4p_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, province[i], tstamp))
-    tol <- tol - 1
-  }
+                          tolerance_target=tol, verbose=F, M=5)
 }
+stopImplicitCluster()
 
+Sys.time() - tic
 ```
 
 
-### Stop if it takes more than 10 minutes
+## Back of an envelope calculation 
 ```{r}
-# set.seed(42)
-# sleeps <- sample(10, size=5)
-# sleeps
-# 
-# iter <- 5
-# result <- list()
-# for (i in seq_len(iter)) {
-#   result[[i]] <- tryCatch({
-#     setTimeLimit(elapsed = 6)
-#     Sys.sleep(sleeps[[i]])
-#     setTimeLimit(elapsed = Inf)
-#      c(iter = i, slp = sleeps[[i]])
-#   }, error = function(e) NULL)
-# }
-# 
-# result
-# 
-devtools::load_all()
-# create_get_sum_stat_sepiar_erlang_province()
-pop_province <- data.table::fread("data/census_2008.csv")
-pop_province$Province_Korean <- c("양강", "함북", "함남", "강원", "자강", "평북", "평남", "황북", "황남", "평양", "남포")
-pop_province$province_clean <- janitor::make_clean_names(pop_province$Province)
-
-# It appears that ABC_sequential does not take additional parameters for the input function. Since I have to set the initial population  
-
-for(i in 1:nrow(pop_province)){
-  func_str <- sprintf('get_sum_stat_sepiar_erlang_%s <- function(pars) {
-    params <- params_init(erlang=TRUE)
-    params$obslength <- 70 #
-    params$tau <- 0.2 #
-    params$init$S <- %s
-    p1 <- round(pars[1])
-    params$ndays <- p1 + params$obslength + 1
-    params$R0 <- pars[2]
-    params$day_intervention <- p1 + pars[3] #
-    params$R0_2 <- pars[4] #
-
-    out <- sepiar_erlang_stoch(params)
-    day_filter <- seq(1, by = round(1/params$tau), length.out = params$ndays)
-    out <- out[day_filter, "CI"]
-    daily_inc <- diff(out)
-
-    res <- c(sum(daily_inc[1:p1]), daily_inc[(p1+1):(p1+params$obslength)])
-
-    return(res)
-  }', pop_province$province_clean[i], pop_province$Total[i])
-
-  eval(parse(text = func_str))
-}
-  
-df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
-province_kor <- unique(df$province)
-# for(i in 1:length(province)){
-#   message(nrow(df[df$province == province[i],]))
-# }
-
-
-library(EasyABC)
-prior <- list(c("unif",5,150), c("unif",1,20), c("unif",-5,10), 
-              c("unif",0.1,2))
-parm <- params_init(erlang=TRUE)
-nsim <- 50
-alpha <- 0.8
-# tol <- 8
-nrep <- 10
-
-obslength <- 70
-#obslength is also defined as 70 in the get_sum_stat_sepiar_erlang_province
-timelimit <- 10*60 # 10 minutes
-for(i in 1:nrow(pop_province)){
-  d <- df[df$province == pop_province$Province_Korean[i],]
-  d$day <- 0:(nrow(d)-1)
-  # is this a reasonable assumption
-  case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
-  sum_stat_obs <- c(case_before, d$case[1:obslength])
-  # -----------------------------
-  # does NA cause problems? Let's remove NA's and test
-  for (j in 2:length(sum_stat_obs)){
-    sum_stat_obs[j] <- ifelse(is.na(sum_stat_obs[j]), sum_stat_obs[j-1], sum_stat_obs[j]) 
-  }
-  #-------------------------------
-  tol <- 5
-  model <- eval(parse(text=paste0("get_sum_stat_sepiar_erlang_", pop_province$province_clean[i])))
-  
-  for (s in 1:9) {
-    cat("seed =", s, "\n")
-    set.seed(s)
-    
-    trycatchres <- tryCatch({
-      setTimeLimit(elapsed = timelimit)
-      res <- ABC_sequential(method="Delmoral",
-                            model=model,
-                            prior=prior, nb_simul=nsim,                            summary_stat_target=sum_stat_obs, 
-                            alpha=alpha,
-                            tolerance_target=tol, verbose=F, M=nrep)
-      
-     setTimeLimit(elapsed = Inf)
-     
-     tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-     saveRDS(res, 
-            sprintf("outputs/abc_4p_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, pop_province$province_clean[i], tstamp))
-     
-     x <- TRUE   
-     }, error = function(e) NULL)
-     
-    if (is.null(trycatchres)) break;
-    
-    tol <- tol - 0.5
-  }
-}
-
-```
-
-### Run the model by province
-
-```{r}
-devtools::load_all()
-
-df <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
-province <- unique(df$province)
-obslength <- 70
-# d <- df[df$province == province[1],]
-d <- df[df$province =="함북",]
-d$day <- 0:(nrow(d)-1)
-
-pop_province <- data.table::fread("data/census_2008.csv")
-pop_province$Province_Korean <- c("양강", "함북", "함남", "강원", "자강", "평북", "평남", "황북", "황남", "평양", "남포")
-pop_province$province_clean <- janitor::make_clean_names(pop_province$Province)
-
-params <- params_init(erlang=TRUE)
-params$obslength <- 70 #
-params$tau <- 0.2
-params$init$S <- pop_province[pop_province$Province_Korean=="함북",]$Total
-runres <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_2_seed_9_north_hamgyong_20230213T175148.rds")
-pars <- runres$param[!duplicated(runres$param),]
-apply(pars, 2, summary)
-
-res <- run_sepiar(params=params, model=sepiar_erlang_stoch, params2=pars)
-mod <- res$symptomatic
-library(ggplot2)
-p <- plot_model_data(model=mod, data=d)
-p
-
-p <- p + labs(x="", y="Case")
-p
-```
-
-
-```{r}
-region <- "overall"
-# use clean names
-pop <- get_population_size(region=region)
-
-PARAMETERS <- params_init(I0=3, pop=pop, erlang=TRUE)
-PARAMETERS$model <- sepiar_erlang_stoch
-PARAMETERS$measure_var <- "CI"
-
-pars <- c(30, 4, 0, 0.6)
-get_sum_stat(pars = pars)
-```
-
-### Code snippets
-```{r}
-# Plot epidemic curve by region
-# str_extract(dlist[[2]]$기준시[1], pattern="(^\\d+)") # month
-extract_dates <- function(str, month="월", day="일"){
-  md <- stringr::str_extract_all(str, paste0("\\d+(?=", month, "|", day,")")) # month
-  mddf <- do.call('rbind', md)
-  dates <- as.Date(paste0("2022-", mddf[,1], "-", mddf[,2]))
-  
-  return(dates)
-}
-
-library(rio)
-dlist <- rio::import_list("data/(2022-0811)_코로나19_조선중앙TV_보도_현황표_시도별_일일유열자.xlsx")
-nms <- names(dlist)[2:11]
-caselist <- vector('list', length(nms)) 
-for (i in 1:length(nms)){
-  df <- data.frame(case = dlist[[i+1]]$`당일 발생자수`)
-  df$date <- extract_dates(str = dlist[[i+1]]$기준시)
-  df$area <- nms[i]
-  caselist[[i]] <- df
-}
-
-
-d <- do.call('rbind', caselist)
-head(d)
+I <- 4000000 # number of symptomatic cases
+D <- 74 # number of deaths
+p <- 0.01 # case fatality ratio for omicron
+# Assuming that the number of cases are Omicron cases and the death is a Bernoulli trial with a given probability p (i.e., Omicron case fatality ratio), the number of deaths are distributed as Binom(I,p)
+# choose(4000,40)*p^40*(1-p)^(4000-40)
+# dbinom(40,4000,p)
+df <- data.frame(X=0:I, prob=NA)
+df$prob <- dbinom(df$X, I, p)
+df$lik <- dbinom(D, 0:I, p)
+sum(df$prob)
+sum(df$lik)
+summary(df$lik)
+posprob = which(df$prob > 1e-8)
+poslik = which(df$lik > 1e-8)
+plot(df$X[posprob], df$prob[posprob])
+plot(df$X[poslik], df$lik[poslik])
 
 library(ggplot2)
+library(dplyr)
 
-ggplot(d)+
-  geom_col(aes(date, case), fill="brown", alpha=0.5)+
-  theme_bw() +
-  labs(x="", y="Case")+
-  scale_x_date(date_breaks="1 week", date_labels="%Y-%m-%d",
-               limits=c(min(d$date), max(d$date)))+
-  theme(axis.text.x=element_text(angle=60, hjust=1))+
-  facet_wrap(~area)
+df[posprob,] %>%
+  ggplot()+
+  geom_line(aes(X, prob))+
+  theme_bw()
+
+
+df[poslik,] %>% 
+  ggplot()+
+  geom_line(aes(X,lik))+
+  theme_bw()
+
+# Assuming that the number of deaths are reliable and they are all COVID-related, in particular (Omicron-related deaths)
+# Y<- dbinom(0:I, D, p)
+
 ```
 
-
-
-
-### Run using global variables
+### Compare exponential growth
 ```{r}
-devtools::load_all()
-pop <- readRDS("outputs/pop_by_province_20230213.rds")
-dat <- readRDS("outputs/covid_by_province_20230213.rds")
-# province_kor <- unique(dat$province)
+R0 <- 3
+gamma = 0.15
+beta = R0*gamma
+parm=c(beta=beta, gamma=gamma)
+I0=0.001
+y0=c(S=0.999,I=I0,R=0)
+res=SIR_step(params=parm, y0=y0, tend=100, saveat=1, dt=0.001)
+tail(res)
+final_epidemic_size(R0=3)
 
-replace_NA_with_previous <- function(x){
-  for(j in 2:length(x)){   
-    x[j] <- ifelse(is.na(x[j]), x[j-1], x[j]) 
-  }
-  return (x)
-}
-
-library(EasyABC)
-prior <- list(c("unif",5,150), c("unif",1,20), 
-              c("unif",-5,10), c("unif",0.1,2))
-
-nsim <- 50
-alpha <- 0.8
-# tol <- 8
-nrep <- 10
-
-obslength <- 70
-timelimit <- 1*60 # 10 minutes
-
-model <- sepiar_erlang_stoch
-measure_var <- "CI"
-erlang <- TRUE  
-
-
-for(i in 1:nrow(pop)){
-  d <- dat[dat$province == pop$Province_Korean[i],]
-  d$day <- 0:(nrow(d)-1)
-  # is this a reasonable assumption
-  case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
-  sum_stat_obs <- c(case_before, d$case[1:obslength])
-  sum_stat_obs <- replace_NA_with_previous(sum_stat_obs)
-  
-  # set the global variables ------------------
-  # initial population size by region
-  pop_prov <- get_population_size(region = pop$province_clean[i])
-  PARAMETERS <- params_init(I0=3, pop=pop_prov, erlang=erlang)
-  PARAMETERS$model <- model
-  PARAMETERS$measure_var <- measure_var
-  PARAMETERS$obslength <- obslength
-  
-  testpars <- c(50, 6, 0, 0.6)
-  di <- daily_incidence(pars=testpars)
-  ssmodel <- get_sum_stat(pars=testpars)
-  message(length(sum_stat_obs))
-  message(length(ssmodel))
-
-  # -----------------------------------------------
-  tol <- 5
-  
-  for (s in 1:9) {
-    cat("seed =", s, "\n")
-    set.seed(s)
-    
-    trycatchres <- tryCatch({
-      setTimeLimit(elapsed = timelimit)
-      res <- ABC_sequential(method="Delmoral",
-                            model=get_sum_stat,
-                            prior=prior, nb_simul=nsim,                            summary_stat_target=sum_stat_obs, 
-                            alpha=alpha,
-                            tolerance_target=tol, verbose=F, M=nrep)
-      
-     setTimeLimit(elapsed = Inf)
-     
-     tstamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-     saveRDS(res, 
-            sprintf("outputs/abc_4p_erlang_alpha_%s_tol_%s_seed_%s_%s_%s.rds", alpha, tol, s, pop$province_clean[i], tstamp))
-     
-     x <- TRUE   
-     }, error = function(e) NULL)
-     
-    if (is.null(trycatchres)) break;
-    
-    tol <- tol - 0.5
-  }
-}
-
+res2=exp_growth_step(params=c(r=(R0-1)*gamma), y0=c(I=I0), tend=100, saveat=1, dt=0.001)
 ```
-
-
-### Run the model by province
-
+### Global COVID-19 data set
 ```{r}
-devtools::load_all()
-pop <- readRDS("outputs/pop_province_20230213.rds")
-dat <- readRDS("outputs/covid_epideimc_by_province_20230213T113750.rds")
-# province_kor <- unique(dat$province)
-province <- unique(dat$province)
-obslength <- 70
-# d <- dat[dat$province == province[1],]
-d <- dat[dat$province =="함북",]
-d$day <- 0:(nrow(d)-1)
+confirmed = data.table::fread("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv")
 
-i <- 1
-region <- pop$province_clean[i]
-pop_prov <- get_population_size(region = region)
+deaths = data.table::fread("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv")
 
-PARAMETERS <- params_init(I0=3, pop=pop_prov, erlang=TRUE)
-PARAMETERS$model <- sepiar_erlang_stoch
-PARAMETERS$measure_var <- c("CE", "CI")
-
-parest <- readRDS("outputs/abc_4p_erlang_alpha_0.8_tol_9_seed_2_ryanggang_20230214T072651.rds")
-pars <- parest$param[!duplicated(parest$param),]
-apply(pars, 2, summary)
-
-set.seed(1)
-di <- daily_incidence(pars[i, ])
-
-set.seed(1)
-res <- run_model(pars=pars, outvar=c("CE", "CI"))
-tail(di)
-tail(res[[1]])
-tail(res[[2]])
-
-p <- plot_model_data(model=mod, data=d)
-p
-
-p <- p + labs(x="", y="Case")
-p
+recovered = data.table::fread("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_recovered_global.csv")
 ```
-
 

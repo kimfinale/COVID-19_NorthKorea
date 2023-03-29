@@ -9,6 +9,12 @@ editor_options:
   chunk_output_type: console
 ---
 
+
+```{r  global_options}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE, eval=FALSE)
+```
+
+
 ### Particle filtering
 ```{r}
 # devtools::load_all()
