@@ -1,4 +1,5 @@
-plot_model_data <- function(model, data, var="symp"){
+plot_model_data <- function(model, data, var="symp",
+                            legend_position=c(0.8,0.7)){
   library(ggplot2)
   sb <- scales::alpha(c("steelblue"), alpha = c(0.2, 0.55, 0.9)) # symptomatic
   br <- scales::alpha(c("brown"), alpha = c(0.5)) # data
@@ -20,7 +21,7 @@ plot_model_data <- function(model, data, var="symp"){
                    limits=c(min(model$date), max(data$date)))+
       theme_bw()+
       theme(axis.text.x=element_text(angle=60, hjust=1))+
-      theme(legend.position = c(0.2, 0.7))
+      theme(legend.position=legend_position)
   }
   else if (var == "inf"){
     p <- ggplot(model, aes(x=date))+
@@ -43,7 +44,7 @@ plot_model_data <- function(model, data, var="symp"){
                    limits=c(min(model$date), max(data$date)))+
       theme_bw()+
       theme(axis.text.x=element_text(angle=60, hjust=1))+
-      theme(legend.position = c(0.2, 0.7))
+      theme(legend.position=legend_position)
   }
 
   return(p)

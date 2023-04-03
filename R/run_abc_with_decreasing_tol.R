@@ -9,7 +9,8 @@ run_abc_with_decreasing_tol <- function(method,
                                         nsim,
                                         target,
                                         alpha,
-                                        nrep){
+                                        nrep,
+                                        save_res=TRUE){
   library(EasyABC)
   tol <- init_tol
   res_to_save <- NULL # store the results and save when it is the best (i.e., when the next res is NULL)
@@ -29,14 +30,16 @@ run_abc_with_decreasing_tol <- function(method,
                                         verbose=F,
                                         M=nrep))
 
-    tstamp <- timestamp()
-    if(!is.null(res) & z == niter) {
+    tstamp <- tstamp()
+    if (!is.null(res)) {
+      if(z == niter & save_res) {
       saveRDS(res_to_save, paste0("outputs/abc_region_", PARAMETERS$region, "_erlang_",
                                   PARAMETERS$erlang, "_alpha_", alpha,
                                   "_tol_", tol, "_seed_", seed, "_", tstamp, ".rds"))
+      }
     }
-    if (is.null(res)) {
-      if(!is.null(res_to_save)){
+    else {
+      if (!is.null(res_to_save) & save_res) {
         saveRDS(res_to_save, paste0("outputs/abc_region_", PARAMETERS$region, "_erlang_",
                                     PARAMETERS$erlang, "_alpha_", alpha,
                                     "_tol_", tol, "_seed_", seed, "_", tstamp, ".rds"))
@@ -47,5 +50,6 @@ run_abc_with_decreasing_tol <- function(method,
     res_to_save <- res
     tol <- tol - decrement
   }
-  return(c(seed=seed, final_tolerance=tol, alpha=alpha, final_tstamp=tstamp))
+  return(list(fit=res_to_save, seed=seed, final_tolerance=tol,
+              alpha=alpha, final_tstamp=tstamp))
 }

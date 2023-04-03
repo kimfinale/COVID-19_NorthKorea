@@ -30,7 +30,7 @@ pop <- readRDS("data/pop_by_province_20230213.rds")# covid case by province
 covid <- readRDS("outputs/covid_by_province_20230213.rds")
 ```
 
-### BayesianTools package
+### BayesianTools package - MCMC
 ```{r}
 devtools::load_all()
 pop <- readRDS("data/pop_by_province_20230213.rds")
@@ -42,8 +42,8 @@ unreported <- dat$cumul_symptomatic[1] - dat$symptomatic[1]
 
 PARAMETERS <- initialize_params(pop=sum(pop$Total))
 OBS <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
-# model_name <- "sepiar_euler"
-model_name <- "sepiar_stoch"
+model_name <- "sepiar_euler"
+# model_name <- "sepiar_stoch"
 PARAMETERS$model <- eval(parse(text=model_name))
 # PARAMETERS$model <- sepiar_stoch
 
@@ -70,8 +70,7 @@ loglik <- function(pars) {
   if (any(model < 0)) {
     ll <- -Inf
   } else{
-    ll <- sum(dpois(OBS, model, log=TRUE)) http://127.0.0.1:21077/graphics/plot_zoom_png?width=1407&height=826 
-  }
+    ll <- sum(dpois(OBS, model, log=TRUE))   }
   return(ll)
 }
 
@@ -106,27 +105,201 @@ plot(out)
 # tracePlot(out$chain[sample(2.5e5:5e5, 1e4),])
 # correlationPlot(out)
 # marginalPlot(out)
+```
+
+
+### SMC - BayesianTools package - SMC
+```{r}
+devtools::load_all()
+pop <- readRDS("data/pop_by_province_20230213.rds")
+dat <- readRDS("data/covid_overall_20230122.rds")
+
+# Number of people who were already symptomatic before the first case
+# was officially reported
+unreported <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+
+PARAMETERS <- initialize_params(pop=sum(pop$Total))
+OBS <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
+model_name <- "sepiar_euler"
+# model_name <- "sepiar_stoch"
+PARAMETERS$model <- eval(parse(text=model_name))
+# PARAMETERS$model <- sepiar_stoch
+
+
+
+library(BayesianTools)
+setup <- createBayesianSetup(likelihood = loglik, 
+                             lower = c(1,  1, -10, 1e-3),
+                             upper = c(100,20 ,20, 1))
+s = 2
+set.seed(s)
+settings <- list(initialParticles=2e3, iterations=2e3, adaptive=T)
+out <- runMCMC(bayesianSetup = setup, sampler = "SMC", settings = settings)
+saveRDS(out, paste0("outputs/smc_", model_name, "_seed_", s, "_", tstamp(hour=T, minute=T), ".rds"))
+
+# plot(out)
+
+# print(out)
+# summary(out)
+# summary(out$chain[sample(2.5e5:5e5, 1e4),])
+# # tracePlot(out)
+# tracePlot(out$chain[sample(2.5e5:5e5, 1e4),])
+# correlationPlot(out)
+# marginalPlot(out)
 
 ```
+
+
+### Explore parameter values
+```{r}
+# fls = list.files("outputs/", "smc_sepiar_stoch_seed.*", full.names = TRUE)
+fls = list.files("outputs/", "smc_sepiar_euler_seed.*", full.names = TRUE)
+
+LL = rep(NA, length(fls))
+params = matrix(NA, nrow=length(fls), ncol=4)
+
+for (i in seq_along(fls)) {
+  d = readRDS(fls[i])
+  pars_sm = apply(d$particles, 2, summary)
+  params[i,] = pars_sm[4,]
+  # print(apply(d$particles, 2, summary))
+  ll = rep(NA, 200)
+  for (j in 1:200) {
+    l = loglik(pars = params[i,])
+    while (!is.finite(l)) {
+      l = loglik(pars = params[i,])
+    }
+    ll[j] = l
+  }
+  LL[i] = mean(ll, na.rm=TRUE)
+}
+params[which.max(LL),]
+LL[which.max(LL)]
+# from MCMC
+# parm = c(34.69508, 8.279553, 2.724505, 0.5776921)
+# from SMC
+parm = c(30.86321, 9.693134, 2.549154, 0.5717748)
+# PARAMETERS$model <- sepiar_euler
+# loglik(pars = parm)
+# -192730.9
+PARAMETERS$model <- sepiar_stoch
+
+ll = rep(NA, 200)
+  for (j in 1:200) {
+    l = loglik(pars = parm)
+    while (!is.finite(l)) {
+      l = loglik(pars = parm)
+    }
+    ll[j] = l
+  }
+mean(ll, na.rm=TRUE)
+max(ll, na.rm=TRUE)
+```
+
+### Differential evolution
+
+```{r}
+devtools::load_all()
+pop <- readRDS("data/pop_by_province_20230213.rds")
+dat <- readRDS("data/covid_overall_20230122.rds")
+
+# Number of people who were already symptomatic before the first case
+# was officially reported
+unreported <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+
+PARAMETERS <- initialize_params(pop=sum(pop$Total))
+OBS <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
+model_name <- "sepiar_euler"
+# model_name <- "sepiar_stoch"
+PARAMETERS$model <- eval(parse(text=model_name))
+
+
+library(RcppDE)
+lower=c(1,  1, -10, 1e-3)
+upper=c(100,20 ,20, 1) 
+set.seed(3)
+outDEoptim <- DEoptim(fn=negloglik, lower=lower, upper=upper)
+
+outDEoptim <- DEoptim(fn=negloglik, lower=lower, upper=upper, control=DEoptim.control(NP=200, itermax=4000))
+
+parm = c(34.855471, 8.292033, 2.719610, 0.573286)
+parm = c(34.641208, 8.289339, 2.778588, 0.574176)
+# PARAMETERS$model <- sepiar_euler
+PARAMETERS$model <- sepiar_stoch
+loglik(pars = parm)
+
+```
+
+
+```{r}
+boot_inc <- function(dat, n=100) {
+  bootsamp = matrix(NA, nrow=length(dat), ncol=n)
+  for(i in seq_len(n)){
+    set.seed(i)
+    bootsamp[,i] = rpois(length(dat), dat)
+  }
+  return(bootsamp)
+}
+PARAMETERS$model <- sepiar_euler
+samp = boot_inc(dat=OBS,n=200)
+pars = matrix(NA, nrow=ncol(samp), ncol=5)
+for (i in 1:ncol(samp)) {
+  OBS = samp[,i]
+  out = DEoptim(fn=negloglik, lower=lower, upper=upper,
+                control=DEoptim.control(itermax=200, trace=TRUE))
+  pars[i,1:4] = out$optim$bestmem
+  pars[i,5] = out$optim$bestval
+}
+apply(pars, 2, quantile, probs=c(0.025, 0.5,0.975))
+pars_ode = pars
+# 2.5%  34.50609 8.078429 2.683293 0.5744306 192304.1
+# 50%   35.14728 8.289496 2.745928 0.5753268 192735.2
+# 97.5% 36.26695 8.540605 2.789779 0.5781287 193316.9
+PARAMETERS$model <- sepiar_stoch
+pars = matrix(NA, nrow=ncol(samp), ncol=5)
+for (i in 1:ncol(samp)) {
+  OBS = samp[,i]
+  out = DEoptim(fn=negloglik, lower=lower, upper=upper,
+                control=DEoptim.control(itermax=1000, trace=TRUE))
+  pars[i,1:4] = out$optim$bestmem
+  pars[i,5] = out$optim$bestval
+}
+apply(pars, 2, quantile, probs=c(0.025, 0.5,0.975))
+pars_stoch = pars
+# 2.5%  32.69280 8.256353 2.608057 0.5704892 190626.9
+# 50%   34.27013 8.400966 2.707926 0.5769147 191274.0
+# 97.5% 36.68250 8.634674 2.763187 0.5798849 191753.1
+
+
+OBS <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
+demin = findmin(iter=30)
+
+```
+
+
 
 ### Run: using the estimated parameters 
 ```{r}
 devtools::load_all()
-
 dat <- readRDS("data/covid_overall_20230122.rds")
 pop <- readRDS("data/pop_by_province_20230213.rds")
-fit <- readRDS("outputs/smc_sepiar_stoch_20230329T1505.rds")
+# fit <- readRDS("outputs/smc_sepiar_stoch_20230329T1505.rds")
+fit <- readRDS("outputs/mcmc_sepiar_euler_20230329T1935.rds")
 nrun <- 200
-# (nr=nrow(fit$chain))
-(nr=nrow(fit$particles))
+npar <- 4
+(nr = length(fit[[1]]$chain[,1]))
+allpars = lapply(fit, function(x) x$chain[round(nr/2):nr,1:npar])
+allpars = do.call('rbind', allpars)
+
+# (nr=nrow(fit$particles))
 set.seed(42)
-# pars <- fit$chain[sample(round(nr/2):nr, nrun),1:4]
-pars <- fit$particles[sample(1:nr, nrun),1:4]
+pars <- allpars[sample(1:nrow(allpars), nrun),]
+# pars <- chain[sample(round(nr/2):nr, nrun),1:4]
+# pars <- fit$particles[sample(1:nr, nrun),1:4]
 # hist(pars[,1])
-summary(round(pars[,1]))
 apply(pars, 2, summary)
 
-PARAMETERS <- params_init(pop=sum(pop$Total))
+PARAMETERS <- initialize_params(pop=sum(pop$Total))
 var <- c("CE","CI")
 PARAMETERS$measure_var <- var
 PARAMETERS$model <- sepiar_euler
@@ -141,10 +314,10 @@ sim <- summarize_model_output(model_output=res)
 library(ggplot2)
 p <- plot_model_data(model=sim, data=dat, var="symp")
 p
-ggsave(sprintf("plots/mcmc_fit_%s.png", timestamp()), p, width=3.4*2, height=2.7*2)
+ggsave(sprintf("plots/mcmc_fit_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
 p <- plot_model_data(model=sim, data=dat, var="inf")
 p
-ggsave(sprintf("plots/mcmc_fit_inf_symp_%s.png", timestamp()), p, width=3.4*2, height=2.7*2)
+ggsave(sprintf("plots/mcmc_fit_inf_symp_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
 ```
 
 ### Summary table
@@ -179,7 +352,7 @@ create_summary_table = function(dat,sim,pars,probs=c(0.025, 0.5, 0.975),cfr=0.00
   ce <- sim$CE
   min_date_start <- dat$date[1] - max(round(pars[,1]))
   sim_date_intro = quantile(round(pars[,1]), probs=probs)
-  date_intro_stat = dat$date[1] - sim_date_intro 
+  date_intro_stat = dat$date[1] - rev(sim_date_intro) # rev to rearrange from diff to dates 
 
   sim_date_intervention = quantile(floor(pars[,3]), probs=probs)
   date_intervention_stat = dat$date[1] + sim_date_intervention 

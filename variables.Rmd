@@ -1,0 +1,26 @@
+---
+title: "Variables"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+
+### Define variables used in this package
+This will need to be run every time I makes changes to the package or the dataset.
+```{r}
+# devtools::load_all()
+POP <- readRDS("data/pop_by_province_20230213.rds")
+DAT <- readRDS("data/covid_overall_20230122.rds")
+unreported <-
+    DAT$cumul_symptomatic[1] - DAT$symptomatic[1]
+
+PARAMETERS <- initialize_params(pop=sum(POP$Total))
+OBS <- c(unreported, DAT$symptomatic[1:PARAMETERS$obslength])
+
+usethis::use_data(POP, overwrite=TRUE)
+usethis::use_data(DAT, overwrite=TRUE)
+usethis::use_data(PARAMETERS, overwrite=TRUE)
+usethis::use_data(OBS, overwrite=TRUE)
+```
+

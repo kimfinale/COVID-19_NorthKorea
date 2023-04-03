@@ -12,3 +12,5 @@ LazyData: true
 License: GPL (>= 2)
 Imports: Rcpp (>= 1.0.9)
 LinkingTo: Rcpp
+Depends: 
+    R (>= 2.10)

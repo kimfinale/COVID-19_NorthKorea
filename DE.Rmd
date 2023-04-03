@@ -1,0 +1,107 @@
+---
+title: "Differential evolution"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+### Confidence interval via parametric bootstrapping
+Estimate thetahat
+```{r}
+# obtain the thetahat
+devtools::load_all()
+# pop <- readRDS("data/pop_by_province_20230213.rds")
+# dat <- readRDS("data/covid_overall_20230122.rds")
+# 
+# # Number of people who were already symptomatic before the first case
+# # was officially reported
+# unreported <- 
+#   dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+# 
+# PARAMETERS <- initialize_params(pop=sum(pop$Total))
+# OBS <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
+# model_name <- "sepiar_euler"
+# # model_name <- "sepiar_stoch"
+# PARAMETERS$model <- eval(parse(text=model_name))
+
+
+# Because of the random nature of DEoptim, conduct 30 simulation runs to get the parameter with maximum likelihood
+library(RcppDE)
+ 
+
+lst = find_min_DE(iter=30)
+thetahat = lst$min$optim$bestmem
+# saveRDS(lst, paste0("outputs/DE_fit_", tstamp(),".rds"))
+
+# Generate synthetic data set use the mean
+daily_inc <- daily_incidence(pars=thetahat)
+if (ncol(daily_inc) > 1){
+  stop("More than one column in the daily incidence output")
+}
+p1 <- round(thetahat[1])
+model <- c(sum(daily_inc[1:p1, 1]), daily_inc[(p1+1):nrow(daily_inc), 1])
+nboot <- 200
+# nboot parametric samples of size n; organize in a matrix
+bootdata = replicate(nboot, rpois(length(model), lambda=model))
+# Compute bootstrap estimates thetahat* and differences delta*
+# saveRDS(bootdata, paste0("outputs/DE_bootdata_", tstamp(),".rds"))
+
+# find_best = function(id, iter=30){
+#   # cat("b =", b, "\n")
+#   OBS = bootdata[,id]
+#   outDE = find_min_DE(iter=iter)
+#   return(c(outDE$min$optim$bestmem,outDE$min$optim$bestval))
+# }
+
+parms = matrix(NA, nrow=5, ncol=nboot)
+
+for (b in 1:nboot){
+  cat("b =", b, "\n")
+  OBS = bootdata[,b]
+  outDE = find_min_DE(iter=30)
+  parms[1:4, b] = outDE$min$optim$bestmem
+  parms[5, b] = outDE$min$optim$bestval
+}
+
+
+thetahatstar = parms[1:4,]
+deltastar = thetahatstar - thetahat
+
+# Find quantiles and make the bootstrap confidence interval
+apply(deltastar, 1, quantile, c(0.025, 0.975), na.rm=TRUE)
+```
+
+### Parallel DE 
+```{r}
+# devtools::load_all()
+# obtain the thetahat
+# devtools::install()
+library(COVID19NorthKorea)
+# pop <- readRDS("data/pop_by_province_20230213.rds")
+# dat <- readRDS("data/covid_overall_20230122.rds")
+# Number of people who were already symptomatic before the first case
+# was officially reported
+
+thetahat <- readRDS("outputs/DE_fit_20230403.rds")
+bootdata <- readRDS("outputs/DE_bootdata_20230403.rds")
+
+library(parallel)
+library(doParallel)
+ncores <- detectCores() 
+
+set.seed(42)
+cl <- makeCluster(getOption("cl.cores", 12))
+doParallel::registerDoParallel(cl)
+
+deboot <- foreach(i=1:2, .packages=c("COVID19NorthKorea","RcppDE"),
+              .combine='rbind', .inorder=F) %dopar% { 
+                find_best(id=i, dat=bootdata, iter=30) }
+
+parallel::stopCluster(cl)
+  
+
+```
+
+

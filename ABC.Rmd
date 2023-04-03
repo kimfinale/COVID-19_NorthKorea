@@ -104,21 +104,22 @@ print_params(params=PARAMETERS)
 # PARAMETERS$measure_var <- "CI" # to compare symptomatic case
 sum_stat_obs <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
 
-testpars <- c(33, 8.9, 2,5, 0.6)
-PARAMETERS$model <- sepiar_euler
+# testpars <- c(35, 8.4, 3, 0.6)
+# PARAMETERS$model <- sepiar_euler
+# di <- daily_incidence(pars=testpars)
+# ssmodel <- get_sum_stat(pars=testpars)
+# (length(sum_stat_obs)) 
+# (length(ssmodel))
+# sqrt(sum(ssmodel - sum_stat_obs))
 
-di <- daily_incidence(pars=testpars)
-ssmodel <- get_sum_stat(pars=testpars)
-(length(sum_stat_obs)) 
-(length(ssmodel))
-sqrt(sum(ssmodel - sum_stat_obs))
+
 library(EasyABC)
 ## ABC parameters
 prior <- list(c("unif",1,100), c("unif",1,20), c("unif",-10,20), 
               c("unif",0.001,1))
 nsim <- 50
 alpha <- 0.8
-tol <- 2
+tol <- 20
 nrep <- 1                          
 
 set.seed(42)
@@ -146,18 +147,24 @@ res <- run_with_timelimit(2, ABC_sequential(method="Delmoral",
                       M=nrep))
 res
 
+
+nsim <- 50
+alpha <- 0.95
+nrep <- 5 
 res = run_abc_with_decreasing_tol(method="Delmoral",
-                              timelimit=20*60, 
-                            init_tol=15, 
+                              timelimit=10*60, 
+                            init_tol=5.2, 
                             decrement=0.2, 
                             niter=15, 
-                            seed=i,
+                            seed=2,
                             prior=prior, 
                             target=sum_stat_obs,
                             model=get_sum_stat,
                             nsim=30, 
                             nrep=nrep, 
-                            alpha=alpha)
+                            alpha=alpha,
+                            save_res=F)
+apply(res$fit$param, 2, summary)
 ```
 
 ### Fit overall COVID-19 epidemic
