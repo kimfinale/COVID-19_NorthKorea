@@ -20,7 +20,7 @@ knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE, eval=FALSE)
 library(readxl)
 library(ggplot2)
 
-dat <- read_xlsx("data/covid19_daily.xlsx")
+dat <- read_xlsx("inst/extdata/covid19_daily.xlsx")
 names(dat) <- c("date", "symptomatic", "recovered", "deaths", "cumul_symptomatic", "cumul_recovered", "cumul_isolated", "cumul_deaths")
 dat <- dat[3:(nrow(dat)-1),]
 library(dplyr)
