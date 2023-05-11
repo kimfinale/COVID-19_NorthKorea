@@ -196,6 +196,87 @@ mean(ll, na.rm=TRUE)
 max(ll, na.rm=TRUE)
 ```
 
+### Differential evolution
+
+```{r}
+devtools::load_all()
+pop <- readRDS("data/pop_by_province_20230213.rds")
+dat <- readRDS("data/covid_overall_20230122.rds")
+
+# Number of people who were already symptomatic before the first case
+# was officially reported
+unreported <- dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+
+PARAMETERS <- initialize_params(pop=sum(pop$Total))
+OBS <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
+model_name <- "sepiar_euler"
+# model_name <- "sepiar_stoch"
+PARAMETERS$model <- eval(parse(text=model_name))
+
+
+library(RcppDE)
+lower=c(1,  1, -10, 1e-3)
+upper=c(100,20 ,20, 1) 
+set.seed(3)
+outDEoptim <- DEoptim(fn=negloglik, lower=lower, upper=upper)
+
+outDEoptim <- DEoptim(fn=negloglik, lower=lower, upper=upper, control=DEoptim.control(NP=200, itermax=4000))
+
+parm = c(34.855471, 8.292033, 2.719610, 0.573286)
+parm = c(34.641208, 8.289339, 2.778588, 0.574176)
+# PARAMETERS$model <- sepiar_euler
+PARAMETERS$model <- sepiar_stoch
+loglik(pars = parm)
+
+```
+
+
+```{r}
+boot_inc <- function(dat, n=100) {
+  bootsamp = matrix(NA, nrow=length(dat), ncol=n)
+  for(i in seq_len(n)){
+    set.seed(i)
+    bootsamp[,i] = rpois(length(dat), dat)
+  }
+  return(bootsamp)
+}
+PARAMETERS$model <- sepiar_euler
+samp = boot_inc(dat=OBS,n=200)
+pars = matrix(NA, nrow=ncol(samp), ncol=5)
+for (i in 1:ncol(samp)) {
+  OBS = samp[,i]
+  out = DEoptim(fn=negloglik, lower=lower, upper=upper,
+                control=DEoptim.control(itermax=200, trace=TRUE))
+  pars[i,1:4] = out$optim$bestmem
+  pars[i,5] = out$optim$bestval
+}
+apply(pars, 2, quantile, probs=c(0.025, 0.5,0.975))
+pars_ode = pars
+# 2.5%  34.50609 8.078429 2.683293 0.5744306 192304.1
+# 50%   35.14728 8.289496 2.745928 0.5753268 192735.2
+# 97.5% 36.26695 8.540605 2.789779 0.5781287 193316.9
+PARAMETERS$model <- sepiar_stoch
+pars = matrix(NA, nrow=ncol(samp), ncol=5)
+for (i in 1:ncol(samp)) {
+  OBS = samp[,i]
+  out = DEoptim(fn=negloglik, lower=lower, upper=upper,
+                control=DEoptim.control(itermax=1000, trace=TRUE))
+  pars[i,1:4] = out$optim$bestmem
+  pars[i,5] = out$optim$bestval
+}
+apply(pars, 2, quantile, probs=c(0.025, 0.5,0.975))
+pars_stoch = pars
+# 2.5%  32.69280 8.256353 2.608057 0.5704892 190626.9
+# 50%   34.27013 8.400966 2.707926 0.5769147 191274.0
+# 97.5% 36.68250 8.634674 2.763187 0.5798849 191753.1
+
+
+OBS <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
+demin = findmin(iter=30)
+
+```
+
+
 
 ### Run: using the estimated parameters 
 ```{r}

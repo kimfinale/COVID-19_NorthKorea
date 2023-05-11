@@ -9,17 +9,16 @@ initialize_params <- function(I0=3, pop=25970000, erlang=FALSE, region="overall"
 
   params <- list() # input parameters for the SEIR model
   params$measure_var <- "CI" # daily diff of CI gives daily symptomatic case
-  # params$model <- sepiar_stoch
-  params$model <- sepiar_euler
+  params$model <- sepiar_stoch
   params$erlang <- erlang
   params$region <- region
   # epsilon and gamma from Kim et al. (2021)
-  params$epsilon <- 1/2.7 # mean latent period = 1/epsilon
-  params$delta <- 1/3.4 # mean incubation period = 1/delta
-  params$gamma <- 1/5 # mean infectious period = 1/gamma
+  params$epsilon <- 1/3 # mean latent period = 1/epsilon
+  params$delta <- 1/5.2 # mean incubation period = 1/delta
+  params$gamma <- 1/6.5 # mean infectious period = 1/gamma
 
   params$R0 <- 3.0
-  params$fA <- 0.255 # fraction of asymptomatic state
+  params$fA <- 0.306 # fraction of asymptomatic state
   params$bP <- 1 # relative infectiousness of pre-symptomatic state
   params$bA <- 1 # relative infectiousness of asymptomatic state
   params$tau <- 0.1 # time step size

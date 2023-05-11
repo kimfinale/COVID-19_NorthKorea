@@ -5,525 +5,102 @@ editor_options:
   chunk_output_type: console
 ---
 
-### Epidemic curve by region
-```{r}
-library(COVID19NorthKorea)
-dlist <- rio::import_list("inst/extdata/(2022-0811)_코로나19_조선중앙TV_보도_현황표_시도별_일일유열자.xlsx")
-nm <- names(dlist)[2:length(dlist)]
-caselist <- vector("list", length(nm))
-for (i in 1:length(nm)) {
-  # df <- data.frame(case = dlist[[i+1]]$`당일 발생자수`)
-  df <- dlist[[i+1]]
-  # add a few columns to easier management and plotting
-  df$case <- dlist[[i+1]]$`당일 발생자수`
-  df$date <- extract_dates(dlist[[i+1]]$기준시)
-  df$province <- nm[i]
-  caselist[[i]] <- df
-}
 
-df <- do.call("rbind", caselist)
-
-# saveRDS(df, paste0("outputs/covid_epideimc_by_province_", tstamp(),".rds"))
-
-# library(ggplot2)
-# p<-ggplot(df, aes(date, case))+
-#   geom_col(fill="brown", alpha=0.5)+
-#   theme_bw() +
-#   labs(x="", y="Symptomatic case") +
-#   facet_wrap(~province)
-# p
-# ggsave(sprintf("plots/epidemic_curve_%s.png", tstamp()), p, width=3.4*3, height=2.7*3)
-
-# attack rates
-library(dplyr)
-df %>%
-  group_by(province) %>%
-  summarize(recovered = sum(`당일 완쾌자수`, na.rm=T), 
-            deaths = sum(`당일 사망자 수`, na.rm=T),
-            inf = recovered + deaths) -> df_prov 
-                    
-df_prov$Province_Korean = df_prov$province
-
-pop = POP[,c("Total", "Province_Korean", "Province")]
-df_prov = left_join(df_prov, pop, by="Province_Korean")
-df_prov$attack_rate = 100 * df_prov$inf / df_prov$Total
-
-# Alternative
-# 개성 = 황해북도 https://namu.wiki/w/%EA%B0%9C%EC%84%B1%EC%8B%9C
-# 나선 = 함경북도 https://namu.wiki/w/%EB%9D%BC%EC%84%A0%EC%8B%9C?from=%EB%82%98%EC%84%A0%EC%8B%9C
-df_prov[df_prov$province == "황북","inf"] = df_prov[df_prov$province == "황북","inf"] +  df_prov[df_prov$province == "개성","inf"] 
-df_prov[df_prov$province == "함북","inf"] = df_prov[df_prov$province == "함북","inf"] +  df_prov[df_prov$province == "나선","inf"]
-df_prov$attack_rate = 100 * df_prov$inf / df_prov$Total
-
-# shapefile ggplot2 plotting guide
-# https://rstudio-pubs-static.s3.amazonaws.com/280176_81148aa4c2024d6ca6e9d21598a3e41f.html
-
-dprk = rgdal::readOGR("inst/extdata/gadm41_PRK_shp", "gadm41_PRK_1")
-dprk@data$name_kor = c("자강","함북","함남","황북","황남","개성","강원","강원","평북","평남","평양","나선","양강","평북")
-dprk@data$AR = NA
-nm = dprk@data$name_kor
-for (n in nm){
-  dprk@data[dprk@data$name_kor == n,]$AR = df_prov[df_prov$Province_Korean == n,]$attack_rate
-}
-dprk@data[dprk@data$name_kor  == "개성",]$AR =
-  df_prov[df_prov$Province_Korean == "황북",]$attack_rate
-dprk@data[dprk@data$name_kor  == "나선",]$AR =
-  df_prov[df_prov$Province_Korean == "함북",]$attack_rate
-
-dprk_df <- broom::tidy(dprk, region = "AR")
-head(dprk_df)
-dprk_df$id <- as.double(dprk_df$id) # attack rate
-
-library(RColorBrewer)
-map <- ggplot(data=dprk_df) +
-  geom_polygon(aes(x = long, y = lat, group = group, fill=id),
-            color = 'black', linewidth = 0.5) +
-  scale_fill_gradientn(colors = brewer.pal(9, "YlOrBr"),
-                       limits = c(0, max(dprk_df$id)),
-                       breaks = seq(0, max(dprk_df$id), 5),
-                       "Attack rate (%)")+
-  coord_equal() +
-  theme_map(legend_position = c(0.9, 0.3)) +
-  theme(legend.title = element_text(size=12),
-        legend.text = element_text(size=12))
-
-# ggsave(paste0("plots/ar_", tstamp(), ".png"),
-#          map, width=7.4, height=7.4, units="in")
-
-
-
-# df_prov$province_shape = c("Kangwŏn-do", "Kaesŏng", "Rasŏn", "P'yŏngan-namdo", "Ryanggang", "Chagang-do", "P'yŏngan-namdo", "P'yŏngan-bukto","P'yŏngyang", "Hamgyŏng-namdo", "Hamgyŏng-bukto", "Hwanghae-namdo","Hwanghae-bukto", "P'yŏngan-bukto")
-
-
-# library(raster)
-# # dprk = shapefile("inst/extdata/gadm41_PRK_shp/gadm41_PRK_1.shp")
-# 
-# shp = rgdal::readOGR("inst/extdata/gadm41_PRK_shp", "gadm41_PRK_1")
-# map <- ggplot() + 
-#   geom_polygon(data = dprk,
-#                aes(x = long, y = lat, group = group),
-#                colour = "black", fill = NA) +
-#   theme_map()
-# 
-# shp_df <- broom::tidy(shp, region = "NAME_1")
-# ## Regions defined for each Polygons
-# cnames <- aggregate(cbind(long, lat) ~ id, data=shp_df, FUN=mean)
-# map + 
-#   geom_text(data = cnames, aes(x = long, y = lat, label = id), size = 4) +
-#   theme_map()
-# 
-
-
-
-# library(rgdal)     # R wrapper around GDAL/OGR
-#   # for general plotting
-# library(ggmap)    # for fortifying shapefiles
-
-# Now the shapefile can be plotted as either a geom_path or a geom_polygon.
-# Paths handle clipping better. Polygons can be filled.
-# You need the aesthetics long, lat, and group.
-# map <- 
-#   ggplot() +
-#   geom_path(data = shape_df, 
-#             aes(x = long, y = lat, group = group),
-#             color = 'gray', fill="white", size = .2)
-# 
-# print(map) 
-# 
-# library(RColorBrewer)
-# pal <- brewer.pal(9, "YlOrBr")
-# my_palette <- colorRampPalette(pal)
-# ggplot(data=shape_df) +
-#   geom_path(aes(x = long, y = lat, group = group),
-#             color = 'black', linewidth = 0.5) +
-#   scale_fill_gradientn(limits = c(0, 50),
-#                        breaks = seq(0, 50, 10),
-#                        colors = my_palette,
-#                        "Attack rate") +
-    # geom_polygon(data = shape2, aes(long, lat, group = group),
-    #              fill = NA, inherit.aes = FALSE) +
-    # geom_path(data = shape2, aes(long, lat, group = group),
-    #           color = "black", linewidth = 0.2, inherit.aes = FALSE) +
-# 
-#     geom_polygon(data = shape, aes(long, lat, group = group),
-#                  fill = NA, inherit.aes = FALSE) +
-#     geom_path(data = shape, aes(long, lat, group = group),
-#               color = "black", linewidth = 0.9, inherit.aes = FALSE) +
-    # coord_equal() +
-    # theme_map() +
-    # theme(legend.title = element_text(size=12),
-    #       legend.text = element_text(size=12))
-
-
-# package sf way
-# library(sf)
-# # dprk <- sf::read_sf("inst/extdata/gadm41_PRK_shp/gadm41_PRK_1.shp")
-# dprk <- st_as_sf(dprk)
-# plot(dprk)
-# plot(dprk["AR"], main="Attack rate")
-
-# ggplot(data = dprk) +
-#   geom_sf(aes(fill=AR))
-  
-  
-
-# First read in the shapefile, using the path to the shapefile and the shapefile name minus the
-# extension as arguments
-# shapefile <- readOGR("inst/extdata/gadm41_PRK_shp", "gadm41_PRK_1.shp")
-# 
-# # Next the shapefile has to be converted to a dataframe for use in ggplot2
-# shapefile_df <- fortify(shapefile)
-# 
-# # Now the shapefile can be plotted as either a geom_path or a geom_polygon.
-# # Paths handle clipping better. Polygons can be filled.
-# # You need the aesthetics long, lat, and group.
-# map <- ggplot() +
-# geom_path(data = shapefile_df, 
-#           aes(x = long, y = lat, group = group),
-#           color = 'gray', fill = 'white', size = .2)
-# 
-# print(map) 
-
-# df = as.data.frame(dprk)
-# df$name_kor = c("자강","함북","함남","황북","황남","개성","강원","강원","평북","평남","평양","나선","양강","평북")
-# nm = df$name_kor
-# for (n in nm){
-#   df[df$name_kor == n,]$AR = df_prov[df_prov$Province_Korean == n,]$attack_rate
-# }
-#  df[df$name_kor == "개성",]$AR = df_prov[df_prov$Province_Korean == "황북",]$attack_rate
-#  df[df$name_kor == "나선",]$AR = df_prov[df_prov$Province_Korean == "함북",]$attack_rate
-# 
-
- 
-# get_peak <- function(df) {
-#   
-# }
-
-```
-
-### Case fatality ratio
-
-```{r}
-library(COVID19NorthKorea)
-dlist <- rio::import_list("inst/extdata/(2022-0811)_코로나19_조선중앙TV_보도_현황표_시도별_일일유열자.xlsx")
-nm <- names(dlist)[2:length(dlist)]
-caselist <- vector("list", length(nm))
-for (i in 1:length(nm)) {
-  # df <- data.frame(case = dlist[[i+1]]$`당일 발생자수`)
-  df <- dlist[[i+1]]
-  # add a few columns to easier management and plotting
-  df$case <- dlist[[i+1]]$`당일 발생자수`
-  df$date <- extract_dates(dlist[[i+1]]$기준시)
-  df$province <- nm[i]
-  caselist[[i]] <- df
-}
-
-df <- do.call("rbind", caselist)
-
-# saveRDS(df, paste0("outputs/covid_epideimc_by_province_", tstamp(),".rds"))
-
-# ggsave(sprintf("plots/epidemic_curve_%s.png", tstamp()), p, width=3.4*3, height=2.7*3)
-
-# attack rates
-library(dplyr)
-df %>%
-  group_by(province) %>%
-  summarize(recovered = sum(`당일 완쾌자수`, na.rm=T), 
-            deaths = sum(`당일 사망자 수`, na.rm=T),
-            inf = recovered + deaths) -> df_prov 
-
-x = sum(df_prov$deaths) 
-n = x +  sum(df_prov$inf)
-p = x / n
-
-se = sqrt(p*(1-p)/n)
-ub = p + qnorm(0.975)*se
-lb = p - qnorm(0.975)*se
-paste0(round(p, digits=11), ", ", round(lb, digits=11), ", ", round(ub, digits=11))
-formatC(c(p,lb,ub), format = "e", digits = 6)
-
-prop.test(x=x, n=n, conf.level=.95, correct=FALSE)
-
-library(Hmisc)
-binconf(x=x, n=n, alpha=.05)
-binconf(x=x, n=n, alpha=.05, method="asymptotic")
-
-# likelihood of observation across varied varied 
-p_varied = seq(8e-10, 1e-2, length.out=100)
-LL = dbinom(x=x, size=n, prob=p_varied, log=TRUE)
-plot(p_varied, LL, type="l")
-# plot(p_varied[1:10], LL[1:10], type="l")
-abline(v=0.0304, col=2)
-abline(v=c(0.0187, 0.0748), col=2, lty=2)
-# 1.  Wang C, Liu B, Zhang S, Huang N, Zhao T, Lu Q-B, et al. Differences in incidence and fatality of COVID-19 by SARS-CoV-2 Omicron variant versus Delta variant in relation to vaccine coverage: A world-wide review. Journal of Medical Virology. 2023;95: e28118. doi:10.1002/jmv.28118
-# 3.04 (IQR: 1.87–7.48)
-cfr_omicron = 0.0304
-x_varied = 1:300000
-LL = dbinom(x=x_varied, size=n, prob=cfr_omicron, log=TRUE)
-plot(x_varied, LL, type="l")
-abline(v=x, col=2)
-```
-
-### Differential evolution
-
-```{r}
-devtools::load_all()
-
-library(RcppDE)
-lower = c(1,  1, -10, 1e-3)
-upper = c(100,20 ,20, 1) 
-set.seed(3)
-# Poisson distribution in negloglik
-fit <- DEoptim(fn=negloglik, 
-               lower=lower, 
-               upper=upper,
-               control=DEoptim.control(
-                 NP=1000, itermax=1000, trace=FALSE), dat=OBS)
-
-fit$optim$bestmem
-
-parm = fit$optim$bestmem
-# parm = c(35.282966, 8.288549, 2.779831, 0.574270)
-#       par1       par2       par3       par4 
-# 32.8115045  6.0442542  3.3888758  0.6827156 
-
--1*negloglik(pars=parm, dat=OBS)
-
-y=daily_incidence(pars=parm[1:4])
-p1 <- round(parm[1])
-mod = c(sum(y[1:p1, 1]), y[(p1+1):nrow(y), 1])
-dpois(OBS[1], lambda=mod[1], log=TRUE)
-
-plot(1:nrow(y), y$CI, type='l', xlab="Day", ylab="Daily incidence")
-points(round(parm[1])+1:length(OBS), OBS, col=2)
-```
-
-Start with multiple random seeds to increase the chance of reaching the global maximum.
-
-```{r}
-# easier to install a package and pass it to use the functions associated with the model
-# devtools::install()
-library(COVID19NorthKorea)
-lower = c(1,  1, -10, 1e-3)
-upper = c(100,20 ,20, 1) 
-
-library(parallel)
-library(doParallel)
-ncores <- detectCores() 
-
-set.seed(42)
-cl <- makeCluster(getOption("cl.cores", ncores-2))
-doParallel::registerDoParallel(cl)
-
-fits <- 
-  foreach(i=1:20,
-    .packages = c("COVID19NorthKorea","RcppDE"),
-    .inorder=F) %dopar% {
-      set.seed(i)
-      out <- DEoptim(
-        fn = negloglik,
-        lower = lower, 
-        upper = upper,
-        control = DEoptim.control(NP=1000, itermax=1000),
-        dat = OBS)
-      return(out)}
-
-parallel::stopCluster(cl)
-saveRDS(fits, paste0("outputs/fits_de_", tstamp(),".rds"))
-```
 
 ### Confidence interval via parametric bootstrapping
-
+Estimate thetahat
 ```{r}
-# find the best fit and set the estimates as what we looked for
-fits = readRDS("outputs/fits_de_20230426.rds")
-vals = sapply(fits, function(x) x$optim$bestval)
-id = which.min(vals)
-thetahat = fits[[id]]$optim$bestmem
-# check by plotting
-parm = thetahat
-y = daily_incidence(pars=parm[1:4])
-p1 <- round(parm[1])
+# obtain the thetahat
+devtools::load_all()
+# pop <- readRDS("data/pop_by_province_20230213.rds")
+# dat <- readRDS("data/covid_overall_20230122.rds")
+# 
+# # Number of people who were already symptomatic before the first case
+# # was officially reported
+# unreported <- 
+#   dat$cumul_symptomatic[1] - dat$symptomatic[1] 
+# 
+# PARAMETERS <- initialize_params(pop=sum(pop$Total))
+# OBS <- c(unreported, dat$symptomatic[1:PARAMETERS$obslength])  
+# model_name <- "sepiar_euler"
+# # model_name <- "sepiar_stoch"
+# PARAMETERS$model <- eval(parse(text=model_name))
 
-plot(1:nrow(y), y$CI, type='l', xlab="Day", ylab="Daily incidence")
-points(round(parm[1])+1:length(OBS), OBS, col=2)
 
-model = c(sum(y[1:p1, 1]), y[(p1+1):nrow(y), 1])
-# Generate synthetic data mod as the mean
+# Because of the random nature of DEoptim, conduct 30 simulation runs to get the parameter with maximum likelihood
+library(RcppDE)
+ 
+
+lst = find_min_DE(iter=30)
+thetahat = lst$min$optim$bestmem
+# saveRDS(lst, paste0("outputs/DE_fit_", tstamp(),".rds"))
+
+# Generate synthetic data set use the mean
+daily_inc <- daily_incidence(pars=thetahat)
+if (ncol(daily_inc) > 1){
+  stop("More than one column in the daily incidence output")
+}
+p1 <- round(thetahat[1])
+model <- c(sum(daily_inc[1:p1, 1]), daily_inc[(p1+1):nrow(daily_inc), 1])
 nboot <- 200
 # nboot parametric samples of size n; organize in a matrix
 bootdata = replicate(nboot, rpois(length(model), lambda=model))
 # Compute bootstrap estimates thetahat* and differences delta*
 # saveRDS(bootdata, paste0("outputs/DE_bootdata_", tstamp(),".rds"))
 
+# find_best = function(id, iter=30){
+#   # cat("b =", b, "\n")
+#   OBS = bootdata[,id]
+#   outDE = find_min_DE(iter=iter)
+#   return(c(outDE$min$optim$bestmem,outDE$min$optim$bestval))
+# }
+
 parms = matrix(NA, nrow=5, ncol=nboot)
 
-library(RcppDE)
-for (i in 191:nboot){
-  cat("i =", i, "\n")
-  # use parallel with ncores - 2
-  outDE = find_min_DE(dat=bootdata[,i],
-                      fn=negloglik,
-                      iter=30,
-                      control=DEoptim.control(NP=200,
-                                               itermax=200,
-                                               trace=FALSE)) 
-  parms[1:4, i] = outDE$min$optim$bestmem
-  parms[5, i] = outDE$min$optim$bestval
+for (b in 1:nboot){
+  cat("b =", b, "\n")
+  OBS = bootdata[,b]
+  outDE = find_min_DE(iter=30)
+  parms[1:4, b] = outDE$min$optim$bestmem
+  parms[5, b] = outDE$min$optim$bestval
 }
 
-saveRDS(parms, paste0("outputs/de_bootstrap_parms_", tstamp(),".rds"))
-
-# confidence interval
-fits = readRDS("outputs/fits_de_20230426.rds")
-vals = sapply(fits, function(x) x$optim$bestval)
-id = which.min(vals)
-thetahat = fits[[id]]$optim$bestmem
-parms = readRDS("outputs/de_bootstrap_parms_20230427T22.rds")
 
 thetahatstar = parms[1:4,]
-deltastar = matrix(NA, nrow=nrow(thetahatstar), ncol=ncol(thetahatstar))
-for (i in 1:ncol(thetahatstar)) {
-  deltastar[,i] = thetahatstar[,i] - thetahat
-}
+deltastar = thetahatstar - thetahat
 
 # Find quantiles and make the bootstrap confidence interval
-se = apply(deltastar, 1, quantile, c(0.975, 0.025), na.rm=TRUE)
-thetahat
-(lb = thetahat - se[1,])
-(ub = thetahat - se[2,])
+apply(deltastar, 1, quantile, c(0.025, 0.975), na.rm=TRUE)
 ```
 
-### Stochastic model fitting
-
+### Parallel DE 
 ```{r}
+# devtools::load_all()
+# obtain the thetahat
+# devtools::install()
 library(COVID19NorthKorea)
-PARAMETERS$model <- sepiar_stoch
-library(RcppDE)
-parms = find_min_DE(dat=OBS,
-                   fn=negloglik,
-                   iter=30,
-                   control=DEoptim.control(NP=1000,
-                                               itermax=1000,
-                                               trace=FALSE))
-saveRDS(parms, paste0("outputs/de_stoch_parms_", tstamp(),".rds"))
-```
+# pop <- readRDS("data/pop_by_province_20230213.rds")
+# dat <- readRDS("data/covid_overall_20230122.rds")
+# Number of people who were already symptomatic before the first case
+# was officially reported
 
+thetahat <- readRDS("outputs/DE_fit_20230403.rds")
+bootdata <- readRDS("outputs/DE_bootdata_20230403.rds")
 
-### Negative binomial error distribution
-
-```{r}
-library(COVID19NorthKorea)
-PARAMETERS$model <- sepiar_euler
-library(RcppDE)
-error_dist = "negbin"
-# you need one additional parameter for the dispersion param (5 params in total)
-lower = c(1,  1, -10, 1e-3, 1e-6)
-upper = c(200,20 ,50, 1, 1e3) 
+library(parallel)
+library(doParallel)
+ncores <- detectCores() 
 
 set.seed(42)
+cl <- makeCluster(getOption("cl.cores", 12))
+doParallel::registerDoParallel(cl)
 
-# fit <- DEoptim(fn=negloglik, 
-#                lower=lower, 
-#                upper=upper,
-#                control=DEoptim.control(
-#                  NP=1000, itermax=1000, trace=FALSE),
-#                dat=OBS,
-#                error_dist=error_dist)
+deboot <- foreach(i=1:2, .packages=c("COVID19NorthKorea","RcppDE"),
+              .combine='rbind', .inorder=F) %dopar% { 
+                find_best(id=i, dat=bootdata, iter=30) }
 
-
-parms = find_min_DE(dat = OBS,
-                   fn = negloglik,
-                   error_dist=error_dist,
-                   lower = lower,
-                   upper = upper,
-                   iter=30,
-                   control=DEoptim.control(NP=1000,
-                                               itermax=1000,
-                                               trace=FALSE))
-saveRDS(parms, paste0("outputs/de_", error_dist, "_parms_", tstamp(),".rds"))
-
-
-```
-
-
-### Run using the estimated parameters
-Parameters estimated via parametric bootstrap were 
-```{r}
-library(COVID19NorthKorea)
-set.seed(42)
-
-parms = readRDS(paste0("outputs/de_bootstrap_parms_20230427T22.rds"))
-parms = t(parms) # input for the run_model function 
-apply(parms, 2, summary)
-
-var <- c("CE","CI")
-PARAMETERS$measure_var <- var
-PARAMETERS$model <- sepiar_stoch
-# run_model changes PARAMETERS$measure_var
-res <- run_model(pars=parms[,1:4], var=var)
-sim <- summarize_model_output(model_output=res)
-# Plot: Model vs. data 
-library(ggplot2)
-p <- plot_model_data(model=sim, data=DAT, var="symp")
-p
-# ggsave(sprintf("plots/de_fit_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
-p <- plot_model_data(model=sim, data=DAT, var="inf")
-p
-# ggsave(sprintf("plots/de_fit_inf_symp_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
-
-cfr_omicron = 0.0304
-# Wang C, Liu B, Zhang S, Huang N, Zhao T, Lu Q-B, et al. Differences in incidence and fatality of COVID-19 by SARS-CoV-2 Omicron variant versus Delta variant in relation to vaccine coverage: A world-wide review. Journal of Medical Virology. 2023;95: e28118. doi:10.1002/jmv.28118
-
-sim$`death_2.5%` = sim$`symp_2.5%`* cfr_omicron
-sim$`death_50%` = sim$`symp_50%` * cfr_omicron
-sim$`death_97.5%` = sim$`symp_97.5%` * cfr_omicron
-
-# infection
-paste0(round(sum(sim$`inf_50%`)), " [95% prediction interval: ", round(sum(sim$`inf_2.5%`)), " to ", round(sum(sim$`inf_97.5%`)), "]")
-# deaths
-paste0(round(sum(sim$`death_50%`)), " [95% prediction interval: ", round(sum(sim$`death_2.5%`)), " to ", round(sum(sim$`death_97.5%`)), "]")
-```
-
-
-
-### Grid search
-```{r}
-tic <- Sys.time()
-library(COVID19NorthKorea)
-PARAMETERS$model <- sepiar_euler
-parm_grids = expand.grid(
-  p1 = seq(25, 50, length.out=20),
-  p2 = seq(1, 20, length.out=20),
-  p3 = seq(-2, 10, length.out=20),
-  p4 = seq(0.5, 1, length.out=20),
-  p5 = 10)
-
-out = grid_search(parm_grids = parm_grids,
-                  dat=OBS,
-                  error_dist="negbin")
-parms = do.call("rbind", lapply(out, function(x) x$parm))
-loglik = do.call("rbind", lapply(out, function(x) x$loglik))
-df = cbind(parms, loglik)
-saveRDS(df, paste0("outputs/loglik_negbin_", tstamp(),".rds"))
-
-Sys.time() - tic
-
-# df = readRDS(paste0("outputs/loglik_negbin_", tstamp(),".rds"))
-# df = readRDS(paste0("outputs/loglik_negbin_20230508T0240.rds"))
-df = readRDS(paste0("outputs/loglik_negbin_20230508T0927.rds"))
-
-maxll = max(df[, ncol(df)])
-minll = min(df[, ncol(df)])
-df[which.max(df[, ncol(df)]), ]
-apply(df, 2, summary) 
-# [1]   38.18182    6.00000    1.00000    0.60000    1.00000 -828.14408
-
-# m
-# select params within maxll - 1 (-1/2 equals one standard deviation)
-sdf = df[df[, ncol(df)] > (maxll-2), ]
-apply(sdf, 2, summary) 
-
+parallel::stopCluster(cl)
+  
 
 ```
 

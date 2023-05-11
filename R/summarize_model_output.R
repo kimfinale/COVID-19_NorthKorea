@@ -10,7 +10,7 @@ summarize_model_output <- function(model_output,
   sim <- cbind(sim1, sim2)
 
   if (is.null(end_date)) {
-    dat <- readRDS("inst/extdata/covid_overall_20230122.rds")
+    dat <- readRDS("data/covid_overall_20230122.rds")
     end_date <- dat$date[1] + PARAMETERS$obslength - 1
   }
   start_date <- end_date - nrow(sim) + 1
