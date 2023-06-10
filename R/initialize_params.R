@@ -1,59 +1,62 @@
-initialize_params <- function(I0=3, pop=25970000, erlang=FALSE, region="overall"){
-  # 25970000 North Korea population size
-  # since SEPIAR model is a stochastic model stochastic die-out possible
-  if(region != "overall"){
-    pop <- get_population_size(region)
-  }
-  y0 <- c(S=pop-I0, E=0, P=0, A=0, I=I0, R=0, CE=0, CI=0)
-  y0 <- round(y0) # make sure that the y0 are integers
+initialize_params <- function(...) {
+  params <- list() # input parameters for the model
+  params$population <- 25970000
+  params$susceptible <- params$population - 1
+  params$exposed <- 0
+  params$asymptomatic <- 0
+  params$presymptomatic <- 0
+  params$symptomatic <- 1
+  params$recovered <- 0
+  params$dead <- 0
+  params$cumul_infected <- 0
+  params$cumul_symptomatic <- 0
 
-  params <- list() # input parameters for the SEIR model
-  params$measure_var <- "CI" # daily diff of CI gives daily symptomatic case
-  params$model <- sepiar_stoch
-  params$erlang <- erlang
-  params$region <- region
-  # epsilon and gamma from Kim et al. (2021)
-  params$epsilon <- 1/3 # mean latent period = 1/epsilon
-  params$delta <- 1/5.2 # mean incubation period = 1/delta
-  params$gamma <- 1/6.5 # mean infectious period = 1/gamma
+# 4 parameters to be estimated
+  params$Day1 <- 30 # introduction happened "Day1" days before May 12 (reported)
+  params$Day2 <- 1 # intervention "Day2" days after May 12
+  params$R0 <- 6.0
+  params$R0_int <- 0.6 # R0 after intervention is in place
 
-  params$R0 <- 3.0
-  params$fA <- 0.306 # fraction of asymptomatic state
+  params$model <- seapird_euler
+  # params$erlang <- FALSE
+  # params$region <- "overall"
+
+  params$epsilon <- 1/2.7 # mean latent period = 1/epsilon. Jiang (2023) Chinese doi:10.3760/cma.j.cn112150-20220926-00925
+  params$delta <- 1/3.4 # mean incubation period = 1/delta. Wu (2022) JAMA Network Open doi:10.1001/jamanetworkopen.2022.28008
+  params$gamma <- 1/5 # mean infectious period = 1/gamma. Takahashi (2022) EID doi:10.3201/eid2805.220197
+  # this is solely based on a reasonable assumption that
+  # case fatality ratio was measured as deaths observed within 30 days and
+  # Gamma distribution with shape = 2 and rate = 2 * eta
+  # Strasser (2022) JAMA Network Open doi:10.1001/jamanetworkopen.2022.38354
+  params$eta <- 1 / 14 # 1 / mean delay from symptom onset to death
+
+  params$fA <- 0.255 # fraction of asymptomatic state Yu (2022) JMW doi:10.1002/jmv.28066
   params$bP <- 1 # relative infectiousness of pre-symptomatic state
   params$bA <- 1 # relative infectiousness of asymptomatic state
-  params$tau <- 0.1 # time step size
+  params$cfr <- 0.0304 # case fatality ratio Wang(2023) JMV doi:10.1002/jmv.28118
+
+  params$tau <- 0.01 # time step size
   params$ndays <- 100.0 # number of days for output
   params$day_intervention <- 100.0
-  params$R0_2 <- 1.0 # fraction of R
-  # North Korea data have >80 observations, ignoring some zero incidence
-  params$obslength <- 80
 
-  params$init$S <- y0[["S"]]
-  params$init$E <- y0[["E"]]
-  params$init$P <- y0[["P"]]
-  params$init$I <- y0[["I"]]
-  params$init$A <- y0[["A"]]
-  params$init$R <- y0[["R"]]
-  params$init$CE <- y0[["CE"]]
-  params$init$CI <- y0[["CI"]]
+  # North Korea data have >80 observations, ignoring some zero incidence at the end
+  params$obs_length <- 80
 
-  if (erlang) {
-    params$model <- sepiar_erlang_stoch
-    params$tau <- 0.2 # time step size
-    params$init <- NULL
-    params$init$S <- pop-I0
-    params$init$E1 <- 0
-    params$init$E2 <- 0
-    params$init$P1 <- 0
-    params$init$P2 <- 0
-    params$init$I1 <- I0
-    params$init$I2 <- 0
-    params$init$A1 <- 0
-    params$init$A2 <- 0
-    params$init$R <- 0
-    params$init$CE <- 0
-    params$init$CI <- 0
+
+  # update parameters
+  par = list(...)
+
+  nms = names(par)
+  for (nm in nms) {
+    params[[nm]] = par[[nm]]
   }
 
-  return(params)
+  params[["susceptible"]] <- params[["population"]] - params[["symptomatic"]]
+  # simulation times changes by Day 1 (introduction of the virus)
+  # + 1 because observation is assumed to be the difference between the time steps
+  params[["ndays"]] <- round(params[["Day1"]]) + params[["obs_length"]] + 1
+  # day of intervention is counted by days from introduction
+  params[["day_intervention"]] <- round(params[["Day1"]]) + round(params[["Day2"]])
+
+  return (params)
 }

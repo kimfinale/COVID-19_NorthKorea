@@ -20,10 +20,263 @@ NumericVector reulermultinom(double size, NumericVector rate, double dt) {
 
 // the model framework adopted from https://gallery.rcpp.org/articles/epidemiological-compartment-model/
 // [[Rcpp::export]]
+List seapird_euler(List params) {
+  double tau = params["tau"]; // time step size
+  double ndays = params["ndays"]; // number of days for output
+  int nsteps = ceil(ndays / tau);
+  // vectors for state variables
+  NumericVector S(nsteps); // susceptible
+  NumericVector E(nsteps); // exposed
+  NumericVector A(nsteps); // asymptomatic
+  NumericVector P(nsteps); // pre-symptomatic
+  NumericVector I(nsteps); // symptomatic
+  NumericVector R(nsteps); // recovered
+  NumericVector D(nsteps); // cumulative deaths
+
+  NumericVector CE(nsteps); // cumulative infection
+  NumericVector CI(nsteps); // cumulative symptomatic
+  NumericVector time(nsteps);// fill time w/zeros
+
+  S(0) = params["susceptible"];       // susceptible
+  E(0) = params["exposed"];           // exposed
+  A(0) = params["asymptomatic"];      // asymptomatic
+  P(0) = params["presymptomatic"];    // pre-symptomatic
+  I(0) = params["symptomatic"];       // symptomatic
+  R(0) = params["recovered"];         // recovered
+  D(0) = params["dead"];              // deaths
+  CE(0) = params["cumul_infected"];    // cumulative infection
+  CI(0) = params["cumul_symptomatic"]; // cumulative symptomatic
+
+  double epsilon = params["epsilon"]; // 1 / latent period
+  double delta = params["delta"]; // 1 / incubation period
+  double gamma = params["gamma"]; // 1 / recovery period
+  double eta = params["eta"]; // 1 / delay from (severe) symptom to death
+  double cfr = params["cfr"]; // case-fatality ratio
+  // 1 / rate from pre-symptomatic (P) state to infectious (I) states
+  double rate_P_I = 1 / (1/delta - 1/epsilon); // transition rate from P to I
+  double fA = params["fA"]; // fraction asymptomatic
+  double bA = params["bA"]; // relative infectivity of A compared to I
+  double bP = params["bP"]; // relative infectivity of P compared to I
+  double R0 = params["R0"]; // basic reproduction number
+  double R0_int = params["R0_int"]; // R0 when intervention is in place
+  double day_intervention = params["day_intervention"];
+
+  // 'dur_infect' is a temporary variable reflecting the fraction (fA) of going
+  // to A rather than P (which becomes I later), the duration of P, A, and I
+  // stages, and the infectivity of P (ie, bP) and A (ie, bA) relative to I.
+  // 'dur_infect' multiplied by beta
+  // (transmission rate during I stage) gives R0
+  double dur_infect = fA * bA * (1/rate_P_I + 1/gamma) + (1 - fA) * (bP/rate_P_I + 1/gamma);
+  double beta = R0 / dur_infect;
+
+  // Calculate the number of events for each step, update state vectors
+  // Essentially Euler method was implemented
+  for (int step = 0; step < nsteps - 1; step++) {
+    if (step*tau >= day_intervention) {
+      beta = R0_int / dur_infect;
+    }
+    double St = S[step];
+    double Et = E[step];
+    double Pt = P[step];
+    double It = I[step];
+    double At = A[step];
+    double Rt = R[step];
+    double Dt = D[step];
+    double CEt = CE[step];
+    double CIt = CI[step];
+    // State Equations
+    double N = St + Et + Pt + It + At + Rt;
+    double foi = beta * (bP*Pt + bA*At + It) / N;
+    double new_infections = St * foi * tau;
+    double EtoP = Et * epsilon * (1-fA) * tau;
+    double EtoA = Et * epsilon * fA * tau;
+    double new_symptoms = Pt * rate_P_I * tau;
+    double ItoR = It * (1-cfr) * gamma * tau;
+    double AtoR = At * 1 / (1/gamma + 1/rate_P_I) * tau; //
+    double new_deaths = It * cfr * eta * tau;
+
+    // Calculate the change in each state variable
+    double dS = - new_infections;
+    double dE = new_infections - EtoP - EtoA;
+    double dP = EtoP - new_symptoms;
+    double dI = new_symptoms - ItoR - new_deaths;
+    double dA = EtoA - AtoR;
+    double dR = ItoR + AtoR;
+
+    // Update next timestep
+    S[step + 1] = St + dS;
+    E[step + 1] = Et + dE;
+    A[step + 1] = At + dA;
+    P[step + 1] = Pt + dP;
+    I[step + 1] = It + dI;
+    R[step + 1] = Rt + dR;
+    D[step + 1] = Dt + new_deaths; // deaths
+    CE[step + 1] = CEt + new_infections; // cumulative infection
+    CI[step + 1] = CIt + new_symptoms; // cumulative symptomatic
+    time[step + 1] = (step + 1) * tau;// time in fractional years
+
+  }
+  // Return results as data.frame
+  DataFrame sim = DataFrame::create(
+    Named("time") = time,
+    Named("ausceptible") = S,
+    Named("exposed") = E,
+    Named("asymptomatic") = A,
+    Named("presymptomatic") = P,
+    Named("symptomatic") = I,
+    Named("recovered") = R,
+    Named("dead") = D,
+    Named("cumul_infected") = CE,
+    Named("cumul_symptomatic") = CI);
+
+  return sim;
+}
+
+// [[Rcpp::export]]
+List seapird_tauleap(List params) {
+  double tau = params["tau"]; // time step size
+  double ndays = params["ndays"]; // number of days for output
+  int nsteps = ceil(ndays / tau);
+  // vectors for state variables
+  NumericVector S(nsteps); // susceptible
+  NumericVector E(nsteps); // exposed
+  NumericVector A(nsteps); // asymptomatic
+  NumericVector P(nsteps); // pre-symptomatic
+  NumericVector I(nsteps); // symptomatic
+  NumericVector R(nsteps); // recovered
+  NumericVector D(nsteps); // cumulative deaths
+
+  NumericVector CE(nsteps); // cumulative infection
+  NumericVector CI(nsteps); // cumulative symptomatic
+  NumericVector time(nsteps);// fill time w/zeros
+
+  S(0) = params["susceptible"];       // susceptible
+  E(0) = params["exposed"];           // exposed
+  A(0) = params["asymptomatic"];      // asymptomatic
+  P(0) = params["presymptomatic"];    // pre-symptomatic
+  I(0) = params["symptomatic"];       // symptomatic
+  R(0) = params["recovered"];         // recovered
+  D(0) = params["dead"];              // deaths
+  CE(0) = params["cumul_infected"];    // cumulative infection
+  CI(0) = params["cumul_symptomatic"]; // cumulative symptomatic
+
+  double epsilon = params["epsilon"]; // 1 / latent period
+  double delta = params["delta"]; // 1 / incubation period
+  double gamma = params["gamma"]; // 1 / recovery period
+  double eta = params["eta"]; // 1 / delay from (severe) symptom to death
+  double cfr = params["cfr"]; // case-fatality ratio
+  // 1 / rate from pre-symptomatic (P) state to infectious (I) states
+  double rate_P_I = 1 / (1/delta - 1/epsilon); // transition rate from P to I
+  double fA = params["fA"]; // fraction asymptomatic
+  double bA = params["bA"]; // relative infectivity of A compared to I
+  double bP = params["bP"]; // relative infectivity of P compared to I
+  double R0 = params["R0"]; // basic reproduction number
+  double R0_int = params["R0_int"]; // R0 when intervention is in place
+  double day_intervention = params["day_intervention"];
+
+  // 'dur_infect' is a temporary variable reflecting the fraction (fA) of going
+  // to A rather than P (which becomes I later), the duration of P, A, and I
+  // stages, and the infectivity of P (ie, bP) and A (ie, bA) relative to I.
+  // 'dur_infect' multiplied by beta
+  // (transmission rate during I stage) gives R0
+  double dur_infect = fA * bA * (1/rate_P_I + 1/gamma) + (1 - fA) * (bP/rate_P_I + 1/gamma);
+  double beta = R0 / dur_infect;
+
+  // Calculate the number of events for each step, update state vectors
+  // Essentially Euler method was implemented
+  for (int step = 0; step < nsteps - 1; step++) {
+    if (step*tau >= day_intervention) {
+      beta = R0_int / dur_infect;
+    }
+    double St = S[step];
+    double Et = E[step];
+    double Pt = P[step];
+    double It = I[step];
+    double At = A[step];
+    double Rt = R[step];
+    double Dt = D[step];
+    double CEt = CE[step];
+    double CIt = CI[step];
+    // State Equations
+    double N = St + Et + Pt + It + At + Rt;
+    double foi = beta * (bP*Pt + bA*At + It) / N;
+    // double new_infections = St * foi * tau;
+
+    double new_infections = R::rpois(St * foi * tau);
+    if (new_infections > St) {
+      new_infections = St;
+    }
+
+    double EtoP = R::rpois(Et * epsilon * (1-fA) * tau); //
+    if (EtoP > Et * (1-fA)) {
+      EtoP = Et * (1-fA);
+    }
+    double EtoA = R::rpois(Et * epsilon * fA * tau); //
+    if (EtoA > Et * fA) {
+      EtoA = Et * fA;
+    }
+
+    double new_symptoms = R::rpois(Pt * rate_P_I * tau);
+    if( new_symptoms > Pt) {
+      new_symptoms = Pt;
+    }
+
+    double ItoR = R::rpois(It * (1-cfr) * gamma * tau);
+    if (ItoR > It * (1-cfr)) {
+      ItoR = It * (1-cfr);
+    }
+
+    double AtoR = R::rpois(At * 1 / (1/gamma + 1/rate_P_I) * tau);
+    if (AtoR > At) {
+      AtoR = At;
+    }
+
+    double new_deaths = R::rpois(It * cfr * eta * tau);
+    if( new_deaths > It * cfr) {
+      new_deaths = It * cfr;
+    }
+
+    // Calculate the change in each state variable
+    double dS = - new_infections;
+    double dE = new_infections - EtoP - EtoA;
+    double dP = EtoP - new_symptoms;
+    double dI = new_symptoms - ItoR - new_deaths;
+    double dA = EtoA - AtoR;
+    double dR = ItoR + AtoR;
+
+    // Update next timestep
+    S[step + 1] = St + dS;
+    E[step + 1] = Et + dE;
+    A[step + 1] = At + dA;
+    P[step + 1] = Pt + dP;
+    I[step + 1] = It + dI;
+    R[step + 1] = Rt + dR;
+    D[step + 1] = Dt + new_deaths; // deaths
+    CE[step + 1] = CEt + new_infections; // cumulative infection
+    CI[step + 1] = CIt + new_symptoms; // cumulative symptomatic
+    time[step + 1] = (step + 1) * tau;// time in fractional years
+
+  }
+  // Return results as data.frame
+  DataFrame sim = DataFrame::create(
+    Named("time") = time,
+    Named("ausceptible") = S,
+    Named("exposed") = E,
+    Named("asymptomatic") = A,
+    Named("presymptomatic") = P,
+    Named("symptomatic") = I,
+    Named("recovered") = R,
+    Named("dead") = D,
+    Named("cumul_infected") = CE,
+    Named("cumul_symptomatic") = CI);
+
+  return sim;
+}
+// [[Rcpp::export]]
 List sepiar_stoch(List params) {
   double tau = params["tau"]; // time step size
   double ndays = params["ndays"]; // number of days for output
-  int nsteps = ceil(ndays / tau) + 1;
+  int nsteps = ceil(ndays / tau);
   // vectors for state variables
   NumericVector S(nsteps);
   NumericVector E(nsteps);
@@ -58,7 +311,7 @@ List sepiar_stoch(List params) {
   double bA = params["bA"]; // relative infectivity of A compared to I
   double bP = params["bP"]; // relative infectivity of P compared to I
   double R0 = params["R0"];
-  double R0_2 = params["R0_2"]; // fraction of R0 when intervention is in place
+  double R0_int = params["R0_int"]; // fraction of R0 when intervention is in place
   double day_intervention = params["day_intervention"];
 
   double beta = R0 / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
@@ -79,7 +332,7 @@ List sepiar_stoch(List params) {
   for (int istep = 0; istep < nsteps - 1; istep++) {
 
     if (istep*tau >= day_intervention) {
-      beta = R0_2 / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
+      beta = R0_int / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
     }
 
     double iS = S[istep];
@@ -172,13 +425,11 @@ List sepiar_stoch(List params) {
 
   return sim;
 }
-
-
-// [[Rcpp::export]]
+// // [[Rcpp::export]]
 List sepiar_euler(List params) {
   double tau = params["tau"]; // time step size
   double ndays = params["ndays"]; // number of days for output
-  int nsteps = ceil(ndays / tau) + 1;
+  int nsteps = ceil(ndays / tau);
   // vectors for state variables
   NumericVector S(nsteps);
   NumericVector E(nsteps);
@@ -193,15 +444,14 @@ List sepiar_euler(List params) {
   NumericVector time(nsteps);// fill time w/zeros
 
   // initial values
-  List init = params["init"];
-  S(0) = init["S"];
-  E(0) = init["E"];
-  P(0) = init["P"];
-  I(0) = init["I"];
-  A(0) = init["A"]; //asymptomatic
-  R(0) = init["R"]; // recovered
-  CE(0) = init["CE"]; // cumulative infection
-  CI(0) = init["CI"]; // cumulative symptomatic
+  S(0) = params["susceptible"];
+  E(0) = params["exposed"];
+  P(0) = params["presymptomatic"];
+  I(0) = params["infectious"];
+  A(0) = params["asymptomatic"]; //asymptomatic
+  R(0) = params["recovered"]; // recovered
+  CE(0) = params["cumul_infected"]; // cumulative infection
+  CI(0) = params["cumul_symptomatic"]; // cumulative symptomatic
 
   double epsilon = params["epsilon"]; // 1 / latent period
   double delta = params["delta"]; // 1 / incubation period
@@ -213,7 +463,7 @@ List sepiar_euler(List params) {
   double bA = params["bA"]; // relative infectivity of A compared to I
   double bP = params["bP"]; // relative infectivity of P compared to I
   double R0 = params["R0"];
-  double R0_2 = params["R0_2"]; // fraction of R0 when intervention is in place
+  double R0_int = params["R0_int"]; // fraction of R0 when intervention is in place
   double day_intervention = params["day_intervention"];
 
   double beta = R0 / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
@@ -234,7 +484,7 @@ List sepiar_euler(List params) {
   for (int istep = 0; istep < nsteps - 1; istep++) {
 
     if (istep*tau >= day_intervention) {
-      beta = R0_2 / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
+      beta = R0_int / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
 
     }
     double iS = S[istep];
@@ -307,6 +557,7 @@ List sepiar_euler(List params) {
   return sim;
 }
 
+
 // [[Rcpp::export]]
 List sepiar_erlang_stoch(List params) {
   double tau = params["tau"]; // time step size
@@ -354,7 +605,7 @@ List sepiar_erlang_stoch(List params) {
   double bA = params["bA"]; // relative infectivity of A compared to I
   double bP = params["bP"]; // relative infectivity of P compared to I
   double R0 = params["R0"];
-  double R0_2 = params["R0_2"]; // fraction of R0 when intervention is in place
+  double R0_int = params["R0_int"]; // fraction of R0 when intervention is in place
   double day_intervention = params["day_intervention"];
 
   double beta = R0 / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
@@ -368,7 +619,7 @@ List sepiar_erlang_stoch(List params) {
   for (int istep = 0; istep < nsteps - 1; istep++) {
 
     if (istep*tau >= day_intervention) {
-      beta = R0_2 / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
+      beta = R0_int / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
 
     }
 
@@ -501,7 +752,7 @@ List sepiar_erlang_euler(List params) {
   double bA = params["bA"]; // relative infectivity of A compared to I
   double bP = params["bP"]; // relative infectivity of P compared to I
   double R0 = params["R0"];
-  double R0_2 = params["R0_2"]; // fraction of R0 when intervention is in place
+  double R0_int = params["R0_int"]; // fraction of R0 when intervention is in place
   double day_intervention = params["day_intervention"];
 
   double beta = R0 / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
@@ -513,7 +764,7 @@ List sepiar_erlang_euler(List params) {
   for (int istep = 0; istep < nsteps - 1; istep++) {
 
     if (istep*tau >= day_intervention) {
-      beta = R0_2 / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
+      beta = R0_int / (bP/rate_P_I + bA*fA/gamma + (1-fA)/gamma);
 
     }
 

@@ -1,0 +1,694 @@
+---
+title: "Descriptive_statistics_CK"
+author: "Jong-Hoon Kim, Chaelin Kim"
+output: html_document
+
+# modified descriptive statistics
+---
+
+```{r}
+library(COVID19NorthKorea)
+dlist <- rio::import_list("inst/extdata/(2022-0811)_코로나19_조선중앙TV_보도_현황표_시도별_일일유열자.xlsx")
+nm <- names(dlist)[2:length(dlist)]
+caselist <- vector("list", length(nm))
+
+for (i in 1:length(nm)) {
+  # df <- data.frame(case = dlist[[i+1]]$`당일 발생자수`)
+  df <- dlist[[i+1]]
+  # add a few columns to easier management and plotting
+  df$case <- dlist[[i+1]]$`당일 발생자수`
+  df$date <- extract_dates(dlist[[i+1]]$기준시)
+  df$province <- nm[i]
+  caselist[[i]] <- df
+}
+
+df <- do.call("rbind", caselist)
+
+# 시도명 (Province) | 초기 날짜 (Initial Date) | 최종 날짜 (Final Date) | 기간 (Duration) | 일일 최대 발생자 날짜 (Date of the Highest Daily New Cases) | 일일 최대 발생자 수 (Maximum Daily New Cases) | 누적 발생자 수 (Cumulative Cases) | 누적 완쾌자 수 (Cumulative Recovered Cases) | 누적 사망자 수 (Cumulative Death Cases) | 인구 수 (Population) | 발병률 (Incidence Rate)
+
+# create a summary table
+library(dplyr)
+library(lubridate)
+
+df <- subset(df, !is.na(case))
+
+# summary table -- regional estimates
+df_ds <- df %>%
+  group_by(province) %>%
+  summarize(
+    initial_date         = min(date[case != 0]),
+    final_date           = max(date[case != 0]),
+    duration             = as.numeric(difftime(final_date, initial_date, units="days")) + 1,
+    max_daily_cases_date = date[which.max(case)],
+    max_daily_cases      = max(case),
+    adding_new_cases     = sum(case),
+    cumulative_recovered = sum(`당일 완쾌자수`, na.rm=T),
+    cumulative_deaths    = sum(`당일 사망자 수`, na.rm=T),
+    cumulative_cases     = cumulative_recovered + cumulative_deaths)
+
+pop = POP[,c("Total", "Province_Korean", "Province")]
+df_ds$Province_Korean = df_ds$province
+df_ds = left_join(df_ds, pop, by="Province_Korean")
+
+# Nasun City merged with Hamgyeongbuk Province, and Kaesong merged with Hwanghaebuk Province.
+# 개성 = 황해북도 https://namu.wiki/w/%EA%B0%9C%EC%84%B1%EC%8B%9C
+# 나선 = 함경북도 https://namu.wiki/w/%EB%9D%BC%EC%84%A0%EC%8B%9C?from=%EB%82%98%EC%84%A0%EC%8B%9C
+
+df_ds[df_ds$province == "황북","adding_new_cases"] = df_ds[df_ds$province == "황북","adding_new_cases"] +  df_ds[df_ds$province == "개성","adding_new_cases"] 
+df_ds[df_ds$province == "함북","adding_new_cases"] = df_ds[df_ds$province == "함북","adding_new_cases"] +  df_ds[df_ds$province == "나선","adding_new_cases"]
+
+df_ds[df_ds$province == "황북","cumulative_recovered"] = df_ds[df_ds$province == "황북","cumulative_recovered"] +  df_ds[df_ds$province == "개성","cumulative_recovered"] 
+df_ds[df_ds$province == "함북","cumulative_recovered"] = df_ds[df_ds$province == "함북","cumulative_recovered"] +  df_ds[df_ds$province == "나선","cumulative_recovered"]
+
+df_ds[df_ds$province == "황북","cumulative_deaths"] = df_ds[df_ds$province == "황북","cumulative_deaths"] +  df_ds[df_ds$province == "개성","cumulative_deaths"] 
+df_ds[df_ds$province == "함북","cumulative_deaths"] = df_ds[df_ds$province == "함북","cumulative_deaths"] +  df_ds[df_ds$province == "나선","cumulative_deaths"]
+
+df_ds[df_ds$province == "황북","cumulative_cases"] = df_ds[df_ds$province == "황북","cumulative_cases"] +  df_ds[df_ds$province == "개성","cumulative_cases"] 
+df_ds[df_ds$province == "함북","cumulative_cases"] = df_ds[df_ds$province == "함북","cumulative_cases"] +  df_ds[df_ds$province == "나선","cumulative_cases"]
+
+# estimate attack rate
+df_ds$attack_rate = round(100 * df_ds$cumulative_cases / df_ds$Total, digits = 1)
+df_ds <- df_ds[order(df_ds$Province),]
+
+# edit formatting
+summary_table <- df_ds
+summary_table <- summary_table[!summary_table$province %in% c("개성", "나선"), ]
+summary_table$attack_rate_percent   <- paste0(summary_table$attack_rate,"%")
+summary_table$max_daily_cases       <- sapply(summary_table$max_daily_cases, format, big.mark = ",")
+summary_table$adding_new_cases      <- sapply(summary_table$adding_new_cases, format, big.mark = ",")
+summary_table$cumulative_recovered  <- sapply(summary_table$cumulative_recovered, format, big.mark = ",")
+summary_table$cumulative_deaths     <- sapply(summary_table$cumulative_deaths, format, big.mark = ",")
+summary_table$cumulative_cases      <- sapply(summary_table$cumulative_cases, format, big.mark = ",")
+summary_table$Total                 <- sapply(summary_table$Total, format, big.mark = ",")
+
+summary_table_en <- summary_table[, c("Province", "initial_date", "final_date", 
+                           "duration", "max_daily_cases_date", "max_daily_cases", 
+                           "cumulative_cases", "cumulative_recovered", "cumulative_deaths" , 
+                           "Total", "attack_rate_percent")]
+
+write.csv(summary_table_ds, file = "outputs/summary_table_en.csv", row.names = FALSE)
+
+summary_table_kr <- summary_table[, c("province", "initial_date", "final_date", 
+                           "duration", "max_daily_cases_date", "max_daily_cases", 
+                           "cumulative_cases", "cumulative_recovered", "cumulative_deaths" , 
+                           "Total", "attack_rate_percent")]
+
+summary_table_kr <- summary_table_kr[order(summary_table_kr$province), ]
+
+write.csv(summary_table_kr, file = "outputs/summary_table_kr.csv", row.names = FALSE)
+
+# compare the cumulative cases estimates and sum of new cases
+# overall estimates
+df_cases_all <- df %>%
+  summarize(
+    Province             = "Korean Central TV Total", 
+    adding_new_cases     = sum(case),
+    cumulative_recovered = sum(`당일 완쾌자수`),
+    cumulative_deaths    = sum(`당일 사망자 수`),
+    cumulative_cases     = cumulative_recovered + cumulative_deaths)
+
+df_cases_all$adding_new_cases     <- sapply(df_cases_all$adding_new_cases, format, big.mark = ",")
+df_cases_all$cumulative_recovered <- sapply(df_cases_all$cumulative_recovered, format, big.mark = ",")
+df_cases_all$cumulative_deaths    <- sapply(df_cases_all$cumulative_deaths, format, big.mark = ",")
+df_cases_all$cumulative_cases     <- sapply(df_cases_all$cumulative_cases, format, big.mark = ",")
+
+# regional estimates
+df_cases_region_en <- summary_table[, c("Province",
+                             "adding_new_cases", "cumulative_recovered", 
+                             "cumulative_deaths", "cumulative_cases")]
+
+df_cases_en <- rbind(df_cases_region_en, df_cases_all)
+
+df_cases_region_kr <- summary_table[, c("province",
+                             "adding_new_cases", "cumulative_recovered", 
+                             "cumulative_deaths", "cumulative_cases")]
+
+df_cases_region_kr <- df_cases_region_kr[order(df_cases_region_kr$province), ]
+
+colnames(df_cases_region_kr)[1] <- "Province"
+
+df_cases_kr <- rbind(df_cases_region_kr, df_cases_all)
+
+# save csv
+write.csv(df_cases_kr, file = "outputs/summary_table_total_kr.csv", row.names = FALSE)
+```
+
+
+```{r}
+# compare 노동신문 and 조선중앙TV data by dates (기준시)
+
+library(readxl)
+
+summary_dates_KCTV <- df %>% group_by(date) %>%
+  summarize("신규 유열자(조선중앙TV)" = sum(case),
+            "완쾌자 (조선중앙TV)"     = sum(`당일 완쾌자수`),
+            "사망자 (조선중앙TV)"     = sum(`당일 사망자 수`))
+
+summary_dates_labor <- read_excel("inst/extdata/(2022-0811)_코로나19_노동신문_보도_현황표_전체_일일유열자 2.xlsx")
+
+names(summary_dates_labor) <- c("기준일", 
+                         "신규 유열자(노동신문)", "완쾌자(노동신문)", "사망자(노동신문)")
+
+summary_dates <- left_join(summary_dates_labor, summary_dates_KCTV, by = c("기준일" = "date"))
+
+# convert character column to numeric
+summary_dates$`완쾌자(노동신문)` <- as.numeric(summary_dates$`완쾌자(노동신문)`)
+
+summary_dates_table <- summary_dates %>%
+  mutate(across(2:7, ~ format(., big.mark = ",")))
+
+# replace "     NA" with "-" in each column
+summary_dates_table <- as.data.frame(apply(summary_dates_table , 2, function(x) gsub("^\\s*NA$", "-", x)))
+summary_dates_table$기준일 <- format(as.Date(summary_dates_table$기준일), "%Y/%m/%d")
+
+# save csv
+write.csv(summary_dates_table, file = "outputs/summary_dates.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+# regional trend -- edits based on JK's code
+ library(ggplot2)
+ library(scales)
+
+ p <-ggplot(df, aes(date, case))+
+   geom_col(fill="brown", alpha=0.5)+
+   theme_bw() +
+   labs(x="", y="유열자 수") +
+   scale_y_continuous(labels = comma) + 
+   theme(axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)))
+
+ ggsave("plots/plot_dates.png", plot = p, width = 4.5, height = 4.5, dpi = 300)
+ 
+# 두 자료원 트렌드 한 그래프에 나타내기
+  library(dplyr)
+
+# 데이터 프레임 변환
+df_long <- summary_dates %>%
+   tidyr::pivot_longer(cols = c(`신규 유열자(조선중앙TV)`, `신규 유열자(노동신문)`), 
+                      names_to = "source", values_to = "case")
+df_long$기준일 <- as.Date(df_long$기준일, format="%Y-%m-%d")
+
+# 그래프 생성
+ p2 <- ggplot(df_long, aes(x = 기준일, y = case)) +
+   geom_col(data = subset(df_long, source == "신규 유열자(조선중앙TV)"), aes(fill = source), alpha=0.5) +
+   geom_line(data = subset(df_long, source == "신규 유열자(노동신문)"), aes(color = source), size = 1) +
+   scale_fill_manual(values = c("brown")) +
+   scale_color_manual(values = c("blue")) +
+   theme_bw() +
+   labs(x="", y="유열자 수") +
+   scale_y_continuous(labels = scales::comma) +
+   theme(axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+         legend.title = element_blank())
+ p2
+
+  ggsave("plots/plot_dates2.png", plot = p2, width = 6.5, height = 4.5, dpi = 300)
+
+# 지역별
+  f <-ggplot(df, aes(date, case))+
+   geom_col(fill="brown", alpha=0.5)+
+   theme_bw() +
+   labs(x="", y="유열자 수") +
+   facet_wrap(~province) +
+   theme(axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)))
+
+  
+ ggsave("plots/plot_dates_facet.png", plot = f, width = 3.4*2.8, height = 3.4*2.8, dpi = 1200)
+
+```
+
+
+```{r}
+# 월별 신규열자 지도
+library(lubridate)
+library(data.table)
+library(scales)
+library(ggplot2)
+library(RColorBrewer)
+
+df_month <- df
+df_month$month <- month.name[month(ymd(df_month$date))]
+
+df_month <- df_month %>%
+  group_by(month, province) %>%
+  summarize(adding_new_cases = sum(case))
+    
+df_month <- data.table(df_month)
+
+df_May  <- df_month[month == "May",]
+df_June <- df_month[month == "June",]
+df_July <- df_month[month == "July",]
+
+# 지도 그리기
+dprk = rgdal::readOGR("inst/extdata/gadm41_PRK_shp", "gadm41_PRK_1")
+dprk@data$name_kor = c("자강","함북","함남","황북","황남","개성","강원","강원","평북","평남","평양","나선","양강","평북")
+
+dprk@data$cases_May  = NA
+dprk@data$cases_June = NA
+dprk@data$cases_July = NA
+
+nm = dprk@data$name_kor
+
+for (n in nm){
+  dprk@data[dprk@data$name_kor == n,]$cases_May = df_May[df_May$province == n,]$adding_new_cases }
+
+for (n in nm){
+  dprk@data[dprk@data$name_kor == n,]$cases_June = df_June[df_June$province == n,]$adding_new_cases }
+
+for (n in nm){
+  dprk@data[dprk@data$name_kor == n,]$cases_July = df_July[df_July$province == n,]$adding_new_cases }
+
+# tidy the data
+dprk_df_May <- broom::tidy(dprk, region = "cases_May")
+dprk_df_May$id <- as.double(dprk_df_May$id) # new cases for May
+
+dprk_df_June <- broom::tidy(dprk, region = "cases_June")
+dprk_df_June$id <- as.double(dprk_df_June$id) # new cases for June
+
+dprk_df_July <- broom::tidy(dprk, region = "cases_July")
+dprk_df_July$id <- as.double(dprk_df_July$id) # new cases for July
+
+# create the map plot for May
+map_May <- ggplot(data = dprk_df_May) +
+  geom_polygon(aes(x = long, y = lat, group = group, fill = id),
+               color = 'black', linewidth = 0.5) +
+  coord_equal() +
+  theme_map() +
+  theme(legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12))
+
+# create the map plot for June
+map_June <- ggplot(data = dprk_df_June) +
+  geom_polygon(aes(x = long, y = lat, group = group, fill = id),
+               color = 'black', linewidth = 0.5) +
+  coord_equal() +
+  theme_map() +
+  theme(legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12))
+
+# create the map plot for July
+map_July <- ggplot(data = dprk_df_July) +
+  geom_polygon(aes(x = long, y = lat, group = group, fill = id),
+               color = 'black', linewidth = 0.5) +
+  coord_equal() +
+  theme_map() +
+  theme(legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12))
+
+# add province name
+shp = rgdal::readOGR("inst/extdata/gadm41_PRK_shp", "gadm41_PRK_1")
+shp_df <- broom::tidy(shp, region = "NAME_1")
+
+# Create the map plot with province name
+cnames <- aggregate(cbind(long, lat) ~ id, data = shp_df, FUN = mean)
+
+library(stringr)
+unique_names <- unique(cnames$id)
+
+# Korean map
+# Define the replacements
+replacements <- c("Chagang-do"     = "자강",
+                  "Hamgyŏng-bukto" = "함북",
+                  "Hamgyŏng-namdo" = "함남",
+                  "Hwanghae-bukto" = "황북",
+                  "Hwanghae-namdo" = "황남", 
+                  "Kaesŏng"        = " ",
+                  "Kangwŏn-do"     = "강원",
+                  "Kumgangsan"     = " ",
+                  "P'yŏngan-bukto" = "평북",
+                  "P'yŏngan-namdo" = "평남",
+                  "P'yŏngyang"     = "평양",
+                  "Rasŏn"          = " ",
+                  "Ryanggang"      = "양강",
+                  "Sinŭiju"        = " ")
+
+# modify labels in cnames data frame
+cnames$id <- str_replace_all(cnames$id, replacements)
+
+# correct label location
+print(cnames)
+cnames$lat[cnames$id == "평북"]   <- 40
+cnames$long[cnames$id == "평북"]  <- 125.2
+cnames$lat[cnames$id == "평남"]   <- 39.5
+cnames$long[cnames$id == "평남"]  <- 126
+cnames$lat[cnames$id == "함남"]   <- 40.25
+cnames$lat[cnames$id == "황남"]   <- 38.25
+
+cnames$lat[cnames$id == "강원"]   <- 38.7
+cnames$long[cnames$id == "강원"]  <- 127.5
+cnames$lat[cnames$id == "함북"]   <- 41.7
+cnames$long[cnames$id == "함북"]  <- 129.5
+cnames$long[cnames$id == "양강"]  <- 128.25
+
+# create the map with province name: cases in May
+map_cases_May <- map_May  + 
+  geom_text(data = cnames, aes(x = long, y = lat, label = id), size = 4, color = "#505050") +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlOrBr"),
+                       limits = c(0, max(df_month$adding_new_cases)),
+                       breaks = seq(0, max(df_month$adding_new_cases), 100000),
+                       labels = comma,
+                       "신규 유열자 (5월)") +
+  theme(legend.position = c(0.9, 0.25))
+
+# save the map with the province name: cases in May
+ggsave(paste0("plots/map_cases_May", tstamp(), ".png"),
+       map_cases_May, width=7.4, height=7.4, units="in")
+
+# create the map with province name: cases in June
+map_cases_June <- map_June  + 
+  geom_text(data = cnames, aes(x = long, y = lat, label = id), size = 4, color = "#505050") +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlOrBr"),
+                       limits = c(0, max(df_month$adding_new_cases)),
+                       breaks = seq(0, max(df_month$adding_new_cases), 100000),
+                       labels = comma,
+                       "신규 유열자 (6월)") +
+  theme(legend.position = c(0.9, 0.25))
+
+# save the map with the province name: cases in May
+ggsave(paste0("plots/map_cases_June", tstamp(), ".png"),
+       map_cases_June, width=7.4, height=7.4, units="in")
+
+# create the map with province name: cases in July
+map_cases_July <- map_July  + 
+  geom_text(data = cnames, aes(x = long, y = lat, label = id), size = 4, color = "#505050") +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlOrBr"),
+                       limits = c(0, max(df_month$adding_new_cases)),
+                       breaks = seq(0, max(df_month$adding_new_cases), 100000),
+                       labels = comma,
+                       "신규 유열자 (7월)") +
+  theme(legend.position = c(0.9, 0.25))
+
+# save the map with the province name: cases in May
+ggsave(paste0("plots/map_cases_July", tstamp(), ".png"),
+       map_cases_July, width=7.4, height=7.4, units="in")
+
+```
+
+
+
+```{r}
+# attack rate heat map -- used JHK's code
+# added the province names
+
+dprk = rgdal::readOGR("inst/extdata/gadm41_PRK_shp", "gadm41_PRK_1")
+dprk@data$name_kor = c("자강","함북","함남","황북","황남","개성","강원","강원","평북","평남","평양","나선","양강","평북")
+
+dprk@data$AR = NA
+nm = dprk@data$name_kor
+for (n in nm){
+  dprk@data[dprk@data$name_kor == n,]$AR = df_ds[df_ds$Province_Korean == n,]$attack_rate
+}
+
+dprk@data[dprk@data$name_kor  == "개성",]$AR =
+  df_ds[df_ds$Province_Korean == "황북",]$attack_rate
+dprk@data[dprk@data$name_kor  == "나선",]$AR =
+  df_ds[df_ds$Province_Korean == "함북",]$attack_rate
+
+dprk_df <- broom::tidy(dprk, region = "AR")
+head(dprk_df)
+dprk_df$id <- as.double(dprk_df$id) # attack rate
+
+library(ggplot2)
+library(RColorBrewer)
+
+# create the map plot
+map <- ggplot(data = dprk_df) +
+  geom_polygon(aes(x = long, y = lat, group = group, fill = id),
+               color = 'black', linewidth = 0.5) +
+  coord_equal() +
+  theme_map()
+
+# add province name
+shp = rgdal::readOGR("inst/extdata/gadm41_PRK_shp", "gadm41_PRK_1")
+shp_df <- broom::tidy(shp, region = "NAME_1")
+
+# create the map plot with province name
+cnames <- aggregate(cbind(long, lat) ~ id, data = shp_df, FUN = mean)
+
+library(stringr)
+unique_names <- unique(cnames$id)
+
+# English map
+# define the replacements
+replacements <- c("Chagang-do"     = "Jagang",
+                  "Hamgyŏng-bukto" = "North Hamgyong",
+                  "Hamgyŏng-namdo" = "South Hamgyong",
+                  "Hwanghae-bukto" = "North Hwanghae",
+                  "Hwanghae-namdo" = "South Hwanghae", 
+                  "Kaesŏng"        = " ",
+                  "Kangwŏn-do"     = "Kangwon",
+                  "Kumgangsan"     = " ",
+                  "P'yŏngan-bukto" = "North Pyongan",
+                  "P'yŏngan-namdo" = "South Pyongan",
+                  "P'yŏngyang"     = "Pyongyang",
+                  "Rasŏn"          = " ",
+                  "Ryanggang"      = "Ryanggang",
+                  "Sinŭiju"        = " ")
+
+# Modify labels in cnames data frame
+cnames$id <- str_replace_all(cnames$id, replacements)
+
+# correct label location
+print(cnames)
+cnames$lat[cnames$id == "North Pyongan"]   <- 40
+cnames$long[cnames$id == "North Pyongan"]  <- 125.2
+cnames$lat[cnames$id == "South Pyongan"]   <- 39.5
+cnames$long[cnames$id == "South Pyongan"]  <- 126
+cnames$lat[cnames$id == "South Hamgyong"]  <- 40.25
+cnames$lat[cnames$id == "South Hwanghae"]  <- 38.25
+
+cnames$lat[cnames$id == "Kangwon"]         <- 38.7
+cnames$long[cnames$id == "Kangwon"]        <- 127.5
+cnames$lat[cnames$id == "North Hamgyong"]  <- 41.7
+cnames$long[cnames$id == "North Hamgyong"] <- 129.5
+cnames$long[cnames$id == "Ryanggang"]      <- 128.25
+
+# create the map plot with province name (dark green color)
+map_PN <- map + 
+  geom_text(data = cnames, aes(x = long, y = lat, label = id), size = 4, color = "#9ACD32") +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlOrBr"),
+                       limits = c(0, max(dprk_df$id)),
+                       breaks = seq(0, max(dprk_df$id), 5),
+                       "Attack rate (%)") +
+  theme(legend.position = c(0.9, 0.25),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12))
+
+print(map_PN)
+
+# save the plot with the province name
+ggsave(paste0("plots/ar_PN", ".png"),
+          map_PN, width=7.4, height=7.4, units="in")
+
+# Korean map
+# define the replacements
+replacements <- c("Chagang-do"     = "자강",
+                  "Hamgyŏng-bukto" = "함북",
+                  "Hamgyŏng-namdo" = "함남",
+                  "Hwanghae-bukto" = "황북",
+                  "Hwanghae-namdo" = "황남", 
+                  "Kaesŏng"        = " ",
+                  "Kangwŏn-do"     = "강원",
+                  "Kumgangsan"     = " ",
+                  "P'yŏngan-bukto" = "평북",
+                  "P'yŏngan-namdo" = "평남",
+                  "P'yŏngyang"     = "평양",
+                  "Rasŏn"          = " ",
+                  "Ryanggang"      = "양강",
+                  "Sinŭiju"        = " ")
+
+# Modify labels in cnames data frame
+cnames$id <- str_replace_all(cnames$id, replacements)
+
+# correct label location
+print(cnames)
+cnames$lat[cnames$id == "평북"]   <- 40
+cnames$long[cnames$id == "평북"]  <- 125.2
+cnames$lat[cnames$id == "평남"]   <- 39.5
+cnames$long[cnames$id == "평남"]  <- 126
+cnames$lat[cnames$id == "함남"]   <- 40.25
+cnames$lat[cnames$id == "황남"]   <- 38.25
+
+cnames$lat[cnames$id == "강원"]   <- 38.7
+cnames$long[cnames$id == "강원"]  <- 127.5
+cnames$lat[cnames$id == "함북"]   <- 41.7
+cnames$long[cnames$id == "함북"]  <- 129.5
+cnames$long[cnames$id == "양강"]  <- 128.25
+
+# create the map plot with province name (dark green color)
+map_PN_kr <- map + 
+  geom_text(data = cnames, aes(x = long, y = lat, label = id), size = 4, color = "#505050") +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlOrBr"),
+                       limits = c(0, max(dprk_df$id)),
+                       breaks = seq(0, max(dprk_df$id), 5),
+                       "발병률(%)") +
+  theme(legend.position = c(0.9, 0.25),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12))
+
+# save the plot with the province name
+ggsave(paste0("plots/ar_PN_kr",".png"),
+       map_PN_kr, width=7.4, height=7.4, units="in")
+
+```
+
+
+
+```{r}
+# estimate case-fatality ratio
+library(dplyr)
+
+df_cfr <- df_ds
+
+df_cfr <- df_cfr[order(df_cfr$province), ]
+
+# df_cfr에서 필요한 컬럼만 선택
+df_cfr <- df_cfr %>% dplyr::select(province, cumulative_recovered, cumulative_deaths)
+
+# 총합 행 추가
+total_row <- df_cfr %>%
+  summarise(province = "총합",
+            cumulative_recovered = sum(cumulative_recovered),
+            cumulative_deaths = sum(cumulative_deaths))
+
+df_cfr <- rbind(df_cfr, total_row)
+
+# case-fatality ratio 계산
+df_cfr <- df_cfr %>%
+  mutate(recovered_deaths = cumulative_recovered + cumulative_deaths) %>%
+  mutate(case_fatality_ratio = cumulative_deaths / recovered_deaths)
+
+# case_fatality_ratio 형식 변경
+df_cfr$case_fatality_ratio <- df_cfr$case_fatality_ratio * 100
+
+# case_fatality_ratio 컬럼 값 숫자별로 다른 자릿수로 반올림
+cfr_table <- df_cfr
+cfr_table$case_fatality_ratio <- lapply(cfr_table$case_fatality_ratio, function(x) {
+  round(as.numeric(x), digits = max(0, 2 - floor(log10(abs(as.numeric(x))))))
+})
+
+cfr_table$case_fatality_ratio <- paste0(cfr_table$case_fatality_ratio, "%")
+
+cfr_table$cumulative_recovered <- sapply(cfr_table$cumulative_recovered, format, big.mark = ",")
+cfr_table$cumulative_deaths <- sapply(cfr_table$cumulative_deaths, format, big.mark = ",")
+cfr_table$recovered_deaths <- sapply(cfr_table$recovered_deaths, format, big.mark = ",")
+
+write.csv(cfr_table, file = "outputs/cfr_table.csv", row.names = FALSE)
+
+
+# 지도 그리기
+dprk = rgdal::readOGR("inst/extdata/gadm41_PRK_shp", "gadm41_PRK_1")
+dprk@data$name_kor = c("자강","함북","함남","황북","황남","개성","강원","강원","평북","평남","평양","나선","양강","평북")
+
+dprk@data$deaths  = NA
+dprk@data$cfr  = NA
+
+nm = dprk@data$name_kor
+
+df_cfr <- df_cfr[df_cfr$province != "총합", ]
+
+for (n in nm){
+  dprk@data[dprk@data$name_kor == n,]$deaths = df_cfr[df_cfr$province == n,]$cumulative_deaths}
+
+for (n in nm){
+  dprk@data[dprk@data$name_kor == n,]$cfr = df_cfr[df_cfr$province == n,]$case_fatality_ratio}
+
+# tidy the data
+dprk_df_deaths <- broom::tidy(dprk, region = "deaths")
+dprk_df_deaths$id <- as.double(dprk_df_deaths$id)
+
+dprk_df_cfr <- broom::tidy(dprk, region = "cfr")
+dprk_df_cfr$id <- as.double(dprk_df_cfr$id)
+
+# create the map plot for deaths
+map_deaths <- ggplot(data = dprk_df_deaths) +
+  geom_polygon(aes(x = long, y = lat, group = group, fill = id),
+               color = 'black', linewidth = 0.5) +
+  coord_equal() +
+  theme_map() +
+  theme(legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12))
+
+# create the map plot for cfr
+map_cfr <- ggplot(data = dprk_df_cfr) +
+  geom_polygon(aes(x = long, y = lat, group = group, fill = id),
+               color = 'black', linewidth = 0.5) +
+  coord_equal() +
+  theme_map() +
+  theme(legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12))
+
+# add province name
+shp = rgdal::readOGR("inst/extdata/gadm41_PRK_shp", "gadm41_PRK_1")
+shp_df <- broom::tidy(shp, region = "NAME_1")
+
+# create the map plot with province name
+cnames <- aggregate(cbind(long, lat) ~ id, data = shp_df, FUN = mean)
+
+library(stringr)
+unique_names <- unique(cnames$id)
+
+# Korean map
+# define the replacements
+replacements <- c("Chagang-do"     = "자강",
+                  "Hamgyŏng-bukto" = "함북",
+                  "Hamgyŏng-namdo" = "함남",
+                  "Hwanghae-bukto" = "황북",
+                  "Hwanghae-namdo" = "황남", 
+                  "Kaesŏng"        = " ",
+                  "Kangwŏn-do"     = "강원",
+                  "Kumgangsan"     = " ",
+                  "P'yŏngan-bukto" = "평북",
+                  "P'yŏngan-namdo" = "평남",
+                  "P'yŏngyang"     = "평양",
+                  "Rasŏn"          = " ",
+                  "Ryanggang"      = "양강",
+                  "Sinŭiju"        = " ")
+
+# modify labels in cnames data frame
+cnames$id <- str_replace_all(cnames$id, replacements)
+
+# correct label location
+print(cnames)
+cnames$lat[cnames$id == "평북"]   <- 40
+cnames$long[cnames$id == "평북"]  <- 125.2
+cnames$lat[cnames$id == "평남"]   <- 39.5
+cnames$long[cnames$id == "평남"]  <- 126
+cnames$lat[cnames$id == "함남"]   <- 40.25
+cnames$lat[cnames$id == "황남"]   <- 38.25
+
+cnames$lat[cnames$id == "강원"]   <- 38.7
+cnames$long[cnames$id == "강원"]  <- 127.5
+cnames$lat[cnames$id == "함북"]   <- 41.7
+cnames$long[cnames$id == "함북"]  <- 129.5
+cnames$long[cnames$id == "양강"]  <- 128.25
+
+# create the map with province name: deaths
+map_deaths_number  <- map_deaths  + 
+  geom_text(data = cnames, aes(x = long, y = lat, label = id), size = 4, color = "#505050") +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlOrBr"),
+                       limits = c(0, max(df_cfr$cumulative_deaths)),
+                       breaks = seq(0, max(df_cfr$cumulative_deaths), 3),
+                       "사망자 수") +
+  theme(legend.position = c(0.9, 0.25))
+
+# save the map with the province name: deaths
+ggsave(paste0("plots/map_deaths_number",".png"),
+       map_deaths_number, width=7.4, height=7.4, units="in")
+
+# create the map with province name: cfr
+map_cfr_number <- map_cfr  + 
+  geom_text(data = cnames, aes(x = long, y = lat, label = id), size = 4, color = "#505050") +
+  scale_fill_gradientn(colors = brewer.pal(9, "YlOrBr"),
+                       limits = c(0, max(df_cfr$case_fatality_ratio)+0.001),
+                       breaks = seq(0, max(df_cfr$case_fatality_ratio), 0.002),
+                       labels = comma,
+                       "치명률 (%)") +
+  theme(legend.position = c(0.9, 0.25))
+
+# save the map with the province name: cfr
+ggsave(paste0("plots/map_cfr_number",".png"),
+       map_cfr_number, width=7.4, height=7.4, units="in")
+
+```

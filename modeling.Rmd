@@ -1,0 +1,1227 @@
+---
+title: "Differential evolution"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+
+### Incidence
+
+```{r}
+# library(COVID19NorthKorea)
+devtools::load_all()
+
+pop <- readRDS("inst/extdata/pop_by_province_20230213.rds")
+dat <- readRDS("inst/extdata/covid_by_province_20230213.rds")
+
+prov = unique(dat$province)
+i = 1
+d <- dat[dat$province == prov[i],]
+
+case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
+obs <- c(case_before, d$`당일 발생자수`)
+
+PARAMETERS <- initialize_params(obs_length=length(obs))
+
+parm = c(40,6,2,0.6)
+
+y=incidence(pars=parm)
+
+p1 <- round(parm[1])
+mod = c(sum(y[1:p1+1, 1]), y[(p1+2):nrow(y), 1])
+
+mx = max(c(y[,1], mod, obs), na.rm=T)
+plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily incidence", ylim=c(0,mx))
+points((p1+1):nrow(y), mod)
+points((p1+1):nrow(y), obs, pch='+', col=2)
+```
+
+### Differential evolution
+
+```{r}
+devtools::load_all()
+
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+obs <- c(case_before, d $symptomatic)
+PARAMETERS <- initialize_params(obs_length = length(obs))
+# Day 1 and Day 2 are integers
+mapfun <- function(x) {
+  x[1] <- round(x[1])
+  x[3] <- round(x[3])
+  return(x)
+}
+lower = c(1,  1, -10, 1e-3)
+upper = c(100,20 ,20, 1) 
+set.seed(3)
+
+# Poisson distribution in negloglik
+library(DEoptim)
+fit <- DEoptim(fn=negloglik,
+               lower=lower, 
+               upper=upper,
+               control=DEoptim.control(NP=200, itermax=200, trace=FALSE),
+               fnMap=mapfun,
+               obs=obs)
+
+(parm = fit$optim$bestmem)
+
+fit$optim
+
+negloglik(parm,obs)
+
+y <- incidence(pars=parm)
+
+p1 <- round(parm[1])
+mod = c(sum(y[1:p1+1, 1]), y[(p1+2):nrow(y), 1])
+
+mx = max(c(y[,1], mod, obs), na.rm=T)
+plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily incidence", ylim=c(0,mx))
+
+plot((p1+1):nrow(y), mod, type='l', xlab="Day", ylab="Daily incidence", ylim=c(0,mx))
+points((p1+1):nrow(y), mod)
+points((p1+1):nrow(y), obs, pch='+', col=2)
+
+## the first day represents the cumulative cases occurred before the 
+dat = data.frame(
+  date = seq(from=DATA$date[1]-1, by="1 day", length.out=length(obs)),
+  obs=obs)
+mod = data.frame(date=rev(seq(from=tail(dat$date,1), by="-1 day", length.out=nrow(y))), val = y[,1])
+  
+ggplot(mod, aes(x=date))+
+  geom_line(aes(y=val)) +
+  geom_col(data=dat, aes(x=date, y=obs), fill="brown", alpha=0.5, inherit.aes=FALSE)
+
+# sim_ <- replicate(2000, rpois(n=nrow(y), lambda=y[,1]))
+# sim <- as.data.frame(t(apply(sim_, 1, quantile, probs=c(0.025,0.5,0.975))))
+# 
+# start_date <- DATA$date[1] - round(parm[1])  
+# end_date <- DATA$date[1] + PARAMETERS$obs_length - 1
+# sim$date <- seq(start_date, end_date, by= "day")
+# 
+# dat = data.frame(date = seq(from=DATA$date[1]-1, by="day", length.out=length(obs), obs=obs]))
+# 
+# library(ggplot2)
+# sb <- scales::alpha(c("steelblue"), alpha = c(0.2, 0.55, 0.9)) # symptomatic
+# br <- scales::alpha(c("brown"), alpha = c(0.5)) # data
+# gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+# 
+# ggplot(sim, aes(x=date))+
+#   geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`, fill="Model 95% CrI"))+
+#   geom_line(aes(y=`50%`, color="Model median"), linewidth=1) +
+#   geom_col(data=dat, aes(x=date, y=obs, fill="Data"),
+#            inherit.aes = F) +
+#   scale_fill_manual("", values=c("Model 95% CrI"=sb[1], "Data"=br))+
+#   scale_color_manual("", values=c("Model median"=sb[3]))+
+#   labs(x="", y="Case") +
+#   scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+#                limits=c(min(sim$date), max(dat$date)))+
+#   theme_bw()+
+#   theme(axis.text.x=element_text(angle=60, hjust=1))+
+#   theme(legend.position=c(0.8,0.5))
+```
+
+
+
+### DE in parallel
+Make use of the parallel functionality 
+
+```{r}
+devtools::load_all()
+
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+OBS <- c(case_before, d $symptomatic)
+PARAMETERS <- initialize_params(obs_length = length(OBS))
+# Day 1 and Day 2 are integers
+mapfun <- function(x) {
+  x[1] <- round(x[1])
+  x[3] <- round(x[3])
+  return(x)
+}
+lower = c(1,  1, -10, 1e-3)
+upper = c(100,20 ,20, 1) 
+set.seed(3)
+
+# Poisson distribution in negloglik
+library(DEoptim)
+fit <- DEoptim(fn=negloglik,
+               lower=lower, 
+               upper=upper,
+               control=DEoptim.control(NP=200,
+                                       itermax=200,
+                                       trace=FALSE,
+                                       parallelType=1,
+                                       parVar=c("PARAMETERS","OBS"), 
+                                       packages=c("COVID19NorthKorea")),
+               fnMap=mapfun,
+               obs=OBS)
+
+# saveRDS(fit, "outputs/fit_20230527.rds")
+
+(parm = fit$optim$bestmem)
+
+fit$optim
+
+negloglik(parm,obs)
+
+y <- incidence(pars=parm)
+
+p1 <- round(parm[1])
+mod = c(sum(y[1:p1+1, 1]), y[(p1+2):nrow(y), 1])
+
+mx = max(c(y[,1], mod, obs), na.rm=T)
+plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily incidence", ylim=c(0,mx))
+points((p1+1):nrow(y), mod)
+points((p1+1):nrow(y), obs, pch='+', col=2)
+```
+
+
+### Euler model run
+
+```{r}
+library(COVID19NorthKorea)
+set.seed(42)
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+
+OBS <- c(case_before, d$symptomatic)
+PARAMETERS <- initialize_params(tau=0.01, obs_length=length(OBS))
+# Day 1 and Day 2 are integers
+fit = readRDS("outputs/fit_20230527.rds")
+(parm = fit$optim$bestmem)
+
+set.seed(1)
+y <- incidence(pars=parm)
+## the first day represents the cumulative cases occurred before the first reporting 
+dat1 = data.frame(date=seq(from=DATA$date[1]-1, by="1 day",
+                           length.out=length(OBS)), obs=OBS)
+mod1 = data.frame(date=rev(seq(from=tail(dat1$date,1), by="-1 day",
+                               length.out=nrow(m))), 
+                  val = y[,1])
+
+# mx = max(c(dat1$obs, mod1$`97.5%`), na.rm=T)
+library(ggplot2)
+sb <- scales::alpha(c("steelblue"), alpha = c(0.6, 0.55, 1.0)) # symptomatic
+br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
+gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+
+p <- ggplot(mod1, aes(x=date)) +
+  geom_col(data=dat1, aes(x=date, y=obs), fill=br[1], inherit.aes=F) +
+  geom_line(aes(y=val, color="50%"), linewidth=1.5, color=sb[3])+
+  labs(x="", y="Daily symptomatic case") +
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+               limits=c(min(mod1$date), max(dat1$date)))+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme(legend.position=c(0.8,0.5))
+p
+
+ggsave(sprintf("plots/euler_run_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
+
+```
+
+### Stochastic model run
+
+```{r}
+library(COVID19NorthKorea)
+set.seed(42)
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+
+OBS <- c(case_before, d$symptomatic)
+PARAMETERS <- initialize_params(tau=0.1, obs_length=length(OBS))
+# Day 1 and Day 2 are integers
+fit = readRDS("outputs/fit_20230527.rds")
+(parm = fit$optim$bestmem)
+
+negloglik(parm, OBS)
+
+PARAMETERS$model <- seapird_tauleap
+# PARAMETERS$symptomatic <- 2
+
+nrun = 1000
+set.seed(1)
+y <- incidence(pars=parm)
+m = matrix(NA, nrow=nrow(y), ncol=nrun)
+m[,1] = y[,1]
+for (i in 2:nrun) {
+  set.seed(i)
+  y <- incidence(pars=parm)
+  m[, i] = y[,1]  
+}
+# plot only those with at least two cases
+m <- m[,m[112,]>1] # select only those at least one infection has been generated
+sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.025,0.5,0.975))))
+colSums(sim)
+## the first day represents the cumulative cases occurred before the first reporting 
+dat1 = data.frame(date=seq(from=DATA$date[1]-1, by="1 day",
+                           length.out=length(OBS)), obs=OBS)
+mod1 = data.frame(date=rev(seq(from=tail(dat1$date,1), by="-1 day",
+                               length.out=nrow(m))))
+mod1 <- cbind(mod1, sim)
+# mx = max(c(dat1$obs, mod1$`97.5%`), na.rm=T)
+library(ggplot2)
+sb <- scales::alpha(c("steelblue"), alpha = c(0.6, 0.55, 1.0)) # symptomatic
+br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
+gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+
+p <- ggplot(mod1, aes(x=date)) +
+  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`, fill="95% CrI"))+
+  geom_col(data=dat1, aes(x=date, y=obs, fill="Data"),
+           inherit.aes = F) +
+  geom_line(aes(y=`50%`, color="50%"), linewidth=1.5) +
+  scale_fill_manual("", values=c("95% CrI"=sb[1], "Data"=br))+
+  scale_color_manual("", values=c("50%"=sb[3]))+
+  labs(x="", y="Daily symptomatic case") +
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+               limits=c(min(mod1$date), max(dat1$date)))+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme(legend.position=c(0.8,0.5))
+p
+
+# ggsave(sprintf("plots/tauleap_run_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
+
+```
+
+
+### Parametric bootstrapping
+
+```{r}
+library(COVID19NorthKorea)
+set.seed(42)
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+
+OBS <- c(case_before, d$symptomatic)
+PARAMETERS <- initialize_params(obs_length = length(OBS))
+# Day 1 and Day 2 are integers
+mapfun <- function(x) {
+  x[1] <- round(x[1])
+  x[3] <- round(x[3])
+  return(x)
+}
+lower = c(1,  1, -10, 1e-3)
+upper = c(100,20 ,20, 1) 
+set.seed(4)
+
+# find the best fit and set the estimates as what we looked for
+# fits = readRDS("outputs/fits_de_20230426.rds")
+# fit = readRDS("outputs/fit_20230527.rds")
+# thetahat = fit$optim$bestmem
+# # best fit was detemined based a single fit
+# parm = thetahat
+# 
+# y <- incidence(pars=parm)
+
+# p1 <- round(parm[1])
+# mod = c(sum(y[1:p1+1, 1]), y[(p1+2):nrow(y), 1])
+# 
+# mx = max(c(y[,1], mod, obs), na.rm=T)
+# plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily incidence", ylim=c(0,mx))
+# points((p1+1):nrow(y), mod)
+# points((p1+1):nrow(y), obs, pch='+', col=2)
+
+# Generate synthetic data mod as the mean
+nboot <- 2000
+# nboot parametric samples of size n; organize in a matrix
+# model = c(sum(y[1:p1+1, 1]), y[(p1+2):nrow(y), 1])
+# bootdata = replicate(nboot, rpois(length(model), lambda=model))
+# Compute bootstrap estimates thetahat* and differences delta*
+# saveRDS(bootdata, paste0("outputs/bootdata_", tstamp(),".rds"))
+bootdata = readRDS(paste0("outputs/bootdata_20230527.rds"))
+
+# plot(1:nrow(bootdata), bootdata[,1], type="l")
+# for (i in 2:ncol(bootdata)) {
+#   lines(1:nrow(bootdata), bootdata[,i])
+# }
+# apply(bootdata, 1, mean)
+# apply(bootdata, 1, var)
+
+parms = matrix(NA, nrow=5, ncol=nboot)
+fitlist = vector('list', nboot)
+
+for (i in 1:nboot) {
+  # for (i in 1:200) {
+  cat("i =", i, "\n")
+  # use parallel with ncores - 2
+  fit <- DEoptim(fn=negloglik,
+               lower=lower, 
+               upper=upper,
+               control=DEoptim.control(NP=200,
+                                       itermax=200,
+                                       trace=FALSE,
+                                       parallelType=1,
+                                       parVar=c("PARAMETERS","OBS"), 
+                                       packages=c("COVID19NorthKorea")),
+               fnMap=mapfun,
+               obs=OBS)
+  fitlist[[i]] <- fit
+  parms[1:4, i] = fit$optim$bestmem
+  parms[5, i] = fit$optim$bestval
+}
+
+saveRDS(parms, paste0("outputs/bootstrap_fit_parms_", tstamp(),".rds"))
+saveRDS(fitlist, paste0("outputs/bootstrap_fits_", tstamp(),".rds"))
+```
+
+### Confidence interval
+
+```{r}
+# fits = readRDS("outputs/fits_de_20230426.rds")
+# vals = sapply(fits, function(x) x$optim$bestval)
+# id = which.min(vals)
+# thetahat = fits[[id]]$optim$bestmem
+# parms = readRDS("outputs/de_bootstrap_parms_20230427T22.rds")
+
+# fits = readRDS("outputs/fits_de_20230512.rds")
+fit = readRDS("outputs/fit_20230527.rds")
+thetahat = fit$optim$bestmem
+# parms = readRDS("outputs/bootstrap_fits_de_20230515.rds")
+parms = readRDS("outputs/bootstrap_fit_parms_20230527.rds")
+thetahatstar = parms[1:4,]
+
+apply(thetahatstar, 1, quantile, c(0.975, 0.025), na.rm=TRUE)
+
+deltastar = matrix(NA, nrow=nrow(thetahatstar), ncol=ncol(thetahatstar))
+
+for (i in 1:ncol(thetahatstar)) {
+  deltastar[c(1,3),i] = round(thetahatstar[c(1,3),i]) - round(thetahat[c(1,3)])
+  deltastar[c(2,4),i] = thetahatstar[c(2,4),i] - thetahat[c(2,4)]
+
+}
+
+# Find quantiles and make the bootstrap confidence interval
+se = apply(deltastar, 1, quantile, c(0.975, 0.025), na.rm=TRUE)
+
+thetahat[c(2,4)]
+(lb = thetahat[c(2,4)] - se[1,c(2,4)])
+(ub = thetahat[c(2,4)] - se[2,c(2,4)])
+round(thetahat[c(1,3)])
+(lb = round(thetahat[c(1,3)]) - se[1,c(1,3)])
+(ub = round(thetahat[c(1,3)]) - se[2,c(1,3)])
+
+# thetahat[c(2,4)]
+#      par2      par4 
+# 5.2853668 0.6324351 
+# > (lb = thetahat[c(2,4)] - se[1,c(2,4)])
+#      par2      par4 
+# 5.2848230 0.6319347 
+# > (ub = thetahat[c(2,4)] - se[2,c(2,4)])
+#     par2     par4 
+# 5.285937 0.632920 
+# > round(thetahat[c(1,3)])
+
+```
+
+
+### By region
+
+```{r}
+library(COVID19NorthKorea)
+library(DEoptim)
+
+mapfun <- function(x) {
+  x[1] <- round(x[1])
+  x[3] <- round(x[3])
+  return(x)
+}
+
+pop <- readRDS("inst/extdata/pop_by_province_20230213.rds")
+dat <- readRDS("inst/extdata/covid_by_province_20230213.rds")
+
+prov = unique(dat$province)
+# Day 1 and Day 2 are integers
+mapfun <- function(x) {
+  x[1] <- round(x[1])
+  x[3] <- round(x[3])
+  return(x)
+}
+
+lower = c(1,  1, -10, 1e-3)
+upper = c(100,20 ,20, 1) 
+
+set.seed(3)
+popden <- data.table::fread("outputs/pop_density_AR.csv")
+
+fitlist = vector('list', length(prov))
+for (i in 1:length(prov)) {  
+  d <- dat[dat$province == prov[i],]
+  pop <- popden[popden$Province_Korean == prov[i],]$pop
+  
+  if (!is.na(pop)) {
+    case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
+    
+    OBS <- c(case_before, d$`당일 발생자수`)
+    PARAMETERS <- initialize_params(
+      obs_length=length(OBS),
+      population=round(pop))
+    
+    
+    
+    fit <- DEoptim::DEoptim(fn=negloglik, 
+                   lower=lower, 
+                   upper=upper,
+                   control=DEoptim.control(
+                     NP=200, 
+                     itermax=200,
+                     trace=FALSE,
+                     parallelType=1,
+                     parVar=c("PARAMETERS","OBS"), 
+                     packages=c("COVID19NorthKorea")),
+                   obs=OBS, 
+                   fnMap=mapfun)
+    
+    fitlist[[i]] <- fit
+    
+  }
+}
+
+# plto
+parm = fit$optim$bestmem
+y=incidence(pars=parm)
+p1 <- round(parm[1])
+mod = c(sum(y[1:p1, 1]), y[(p1+1):nrow(y), 1])
+
+plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily incidence")
+mx = max(obs, )
+points((parm[1]+1):length(obs), obs, col=2, ylim=c(0,))
+points(seq(parm[1]-1, length(obs)+parm[1]-2), obs, col=2)
+
+i <- 2
+d <- dat[dat$province == prov[i],]
+pop <- popden[popden$Province_Korean == prov[i],]$pop
+case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] - d$`당일 발생자수`[1] 
+    
+OBS <- c(case_before, d$`당일 발생자수`)
+PARAMETERS <- initialize_params(obs_length=length(OBS), population=round(pop))
+    
+parm = fitlist[[i]]$optim$bestmem
+y=incidence(pars=parm)
+p1 <- round(parm[1])
+# mod = c(sum(y[1:p1, 1]), y[(p1+1):nrow(y), 1])
+
+dat1 = data.frame(
+  date = seq(from=DATA$date[1]-1, by="1 day", length.out=length(OBS)),
+  obs=OBS)
+mod1 = data.frame(date=rev(seq(from=tail(dat1$date,1), by="-1 day", length.out=nrow(y))), val = y[,1])
+  
+ggplot(mod1, aes(x=date))+
+  geom_line(aes(y=val)) +
+  geom_col(data=dat1, aes(x=date, y=OBS), fill="brown", alpha=0.5, inherit.aes=FALSE)+
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+               limits=c(min(sim$date), max(dat$date)))+
+  labs(x="", y="Daily symptomatic case") +
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme(legend.position=c(0.8,0.5))
+
+
+# library(ggplot2)
+# sb <- scales::alpha(c("steelblue"), alpha = c(0.2, 0.55, 0.9)) # symptomatic
+# br <- scales::alpha(c("brown"), alpha = c(0.5)) # data
+# gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+# 
+ggplot(sim, aes(x=date))+
+  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`, fill="Model 95% CrI"))+
+  geom_line(aes(y=`50%`, color="Model median"), linewidth=1) +
+  geom_col(data=dat, aes(x=date, y=obs, fill="Data"),
+           inherit.aes = F) +
+  scale_fill_manual("", values=c("Model 95% CrI"=sb[1], "Data"=br))+
+  scale_color_manual("", values=c("Model median"=sb[3]))+
+  labs(x="", y="Case") +
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+               limits=c(min(sim$date), max(dat$date)))+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme(legend.position=c(0.8,0.5))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Stochastic model fitting
+
+```{r}
+library(COVID19NorthKorea)
+PARAMETERS$model <- sepiar_stoch
+library(RcppDE)
+parms = find_min_DE(dat=OBS,
+                   fn=negloglik,
+                   iter=30,
+                   control=DEoptim.control(NP=1000,
+                                               itermax=1000,
+                                               trace=FALSE))
+saveRDS(parms, paste0("outputs/de_stoch_parms_", tstamp(),".rds"))
+```
+
+
+### Negative binomial error distribution
+
+```{r}
+# library(COVID19NorthKorea)
+devtools::load_all()
+library(RcppDE)
+dist = "negbin"
+# you need one additional parameter for the dispersion param (5 params in total)
+lower = c(1,  1, -10, 1e-3, 1e-6)
+upper = c(200,20 ,50, 1, 1e3) 
+
+set.seed(42)
+
+fit <- DEoptim(fn=negloglik,
+               lower=lower,
+               upper=upper,
+               control=DEoptim.control(
+               NP=1000, itermax=1000, trace=FALSE),
+               obs=CASES_OBSERVED,
+               dist=dist)
+
+
+# parms = find_min_DE(dat = OBS,
+#                    fn = negloglik,
+#                    error_dist=error_dist,
+#                    lower = lower,
+#                    upper = upper,
+#                    iter=30,
+#                    control=DEoptim.control(NP=1000,
+#                                                itermax=1000,
+#                                                trace=FALSE))
+# saveRDS(parms, paste0("outputs/de_", error_dist, "_parms_", tstamp(),".rds"))
+
+
+```
+
+
+
+### Run the model with observational error
+Parameters estimated via parametric bootstrap were 
+```{r}
+library(COVID19NorthKorea)
+set.seed(42)
+PARAMETERS <- initialize_params()
+fits = readRDS("outputs/fits_de_20230512.rds")
+parms = fits$min$optim$bestmem
+
+inc <- incidence(pars=parms)
+p1 <- round(parms[1])
+mod <- c(sum(inc[1:p1, 1]), inc[(p1+1):nrow(inc), 1])
+sim_ <- replicate(2000, rpois(n=length(mod), lambda=mod))
+sim <- as.data.frame(t(apply(sim_, 1, quantile, probs=c(0.025,0.5,0.975))))
+
+end_date <- DATA$date[1] + PARAMETERS$obslength - 1
+start_date <- end_date - nrow(sim) + 1
+sim$date <- seq(start_date, end_date, by= "day")
+
+# run_model changes PARAMETERS$measure_var
+# res <- run_model(pars=parms[,1:4], var=var)
+# sim <- summarize_model_output(model_output=res)
+
+library(ggplot2)
+sb <- scales::alpha(c("steelblue"), alpha = c(0.2, 0.55, 0.9)) # symptomatic
+br <- scales::alpha(c("brown"), alpha = c(0.5)) # data
+gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+
+ggplot(sim, aes(x=date))+
+  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`, fill="Model 95% CrI")) +
+  geom_line(aes(y=`50%`, color="Model median"), linewidth=1) +
+  geom_col(data=DATA, aes(x=date, y=symptomatic, fill="Data"), inherit.aes=F)+
+  scale_fill_manual("", values=c("Model 95% CrI"= sb[1],"Data"=br))+
+  scale_color_manual("", values=c("Model median"=sb[3]))+
+  labs(x="", y="Case") +
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+                   limits=c(min(sim$date), max(DATA$date)))+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme(legend.position=c(0.7,0.5))
+
+# Plot: Model vs. data 
+library(ggplot2)
+p <- plot_model_data(model=sim, data=DATA, var="symp")
+p
+# ggsave(sprintf("plots/de_fit_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
+p <- plot_model_data(model=sim, data=DAT, var="inf")
+p
+# ggsave(sprintf("plots/de_fit_inf_symp_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
+
+cfr_omicron = 0.0304
+# Wang C, Liu B, Zhang S, Huang N, Zhao T, Lu Q-B, et al. Differences in incidence and fatality of COVID-19 by SARS-CoV-2 Omicron variant versus Delta variant in relation to vaccine coverage: A world-wide review. Journal of Medical Virology. 2023;95: e28118. doi:10.1002/jmv.28118
+
+sim$`death_2.5%` = sim$`symp_2.5%`* cfr_omicron
+sim$`death_50%` = sim$`symp_50%` * cfr_omicron
+sim$`death_97.5%` = sim$`symp_97.5%` * cfr_omicron
+
+# infection
+paste0(round(sum(sim$`inf_50%`)), " [95% prediction interval: ", round(sum(sim$`inf_2.5%`)), " to ", round(sum(sim$`inf_97.5%`)), "]")
+# deaths
+paste0(round(sum(sim$`death_50%`)), " [95% prediction interval: ", round(sum(sim$`death_2.5%`)), " to ", round(sum(sim$`death_97.5%`)), "]")
+```
+
+
+### Run using the estimated parameters
+Parameters estimated via parametric bootstrap were 
+```{r}
+library(COVID19NorthKorea)
+set.seed(42)
+
+# parms = readRDS(paste0("outputs/de_bootstrap_parms_20230427T22.rds"))
+# fit = readRDS("outputs/fit_20230527.rds")
+parms = readRDS("outputs/bootstrap_fit_parms_20230527.rds")
+# parms = fit$optim$bestmem
+parms = t(parms) # input for the run_model function 
+# apply(parms, 2, summary)
+
+var <- c("CE","CI")
+PARAMETERS$measure_var <- var
+PARAMETERS$model <- sepiar_stoch
+# run_model changes PARAMETERS$measure_var
+res <- run_model(pars=parms[,1:4], var=var)
+sim <- summarize_model_output(model_output=res)
+# Plot: Model vs. data 
+library(ggplot2)
+p <- plot_model_data(model=sim, data=DAT, var="symp")
+p
+# ggsave(sprintf("plots/de_fit_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
+p <- plot_model_data(model=sim, data=DAT, var="inf")
+p
+# ggsave(sprintf("plots/de_fit_inf_symp_%s.png", tstamp()), p, width=3.4*2, height=2.7*2)
+
+cfr_omicron = 0.0304
+# Wang C, Liu B, Zhang S, Huang N, Zhao T, Lu Q-B, et al. Differences in incidence and fatality of COVID-19 by SARS-CoV-2 Omicron variant versus Delta variant in relation to vaccine coverage: A world-wide review. Journal of Medical Virology. 2023;95: e28118. doi:10.1002/jmv.28118
+
+sim$`death_2.5%` = sim$`symp_2.5%`* cfr_omicron
+sim$`death_50%` = sim$`symp_50%` * cfr_omicron
+sim$`death_97.5%` = sim$`symp_97.5%` * cfr_omicron
+
+# infection
+paste0(round(sum(sim$`inf_50%`)), " [95% prediction interval: ", round(sum(sim$`inf_2.5%`)), " to ", round(sum(sim$`inf_97.5%`)), "]")
+# deaths
+paste0(round(sum(sim$`death_50%`)), " [95% prediction interval: ", round(sum(sim$`death_2.5%`)), " to ", round(sum(sim$`death_97.5%`)), "]")
+```
+
+
+
+### Grid search
+```{r}
+tic <- Sys.time()
+library(COVID19NorthKorea)
+PARAMETERS$model <- sepiar_euler
+parm_grids = expand.grid(
+  p1 = seq(25, 50, length.out=20),
+  p2 = seq(1, 20, length.out=20),
+  p3 = seq(-2, 10, length.out=20),
+  p4 = seq(0.5, 1, length.out=20),
+  p5 = 10)
+
+out = grid_search(parm_grids = parm_grids,
+                  dat=OBS,
+                  error_dist="negbin")
+parms = do.call("rbind", lapply(out, function(x) x$parm))
+loglik = do.call("rbind", lapply(out, function(x) x$loglik))
+df = cbind(parms, loglik)
+saveRDS(df, paste0("outputs/loglik_negbin_", tstamp(),".rds"))
+
+Sys.time() - tic
+
+# df = readRDS(paste0("outputs/loglik_negbin_", tstamp(),".rds"))
+# df = readRDS(paste0("outputs/loglik_negbin_20230508T0240.rds"))
+df = readRDS(paste0("outputs/loglik_negbin_20230508T0927.rds"))
+maxll = max(df[, ncol(df)])
+minll = min(df[, ncol(df)])
+df[which.max(df[, ncol(df)]), ]
+apply(df, 2, summary) 
+# [1]   38.18182    6.00000    1.00000    0.60000    1.00000 -828.14408
+
+# m
+# select params within maxll - 1 (-1/2 equals one standard deviation)
+sdf = df[df[, ncol(df)] > (maxll-2), ]
+apply(sdf, 2, summary) 
+
+
+```
+
+
+### Model fitting based on deaths
+Check the new model to include death
+```{r}
+# devtools::load_all()
+library(COVID19NorthKorea)
+# PARAMETERS <- initialize_params()
+
+parm = c(Day1=35.282966, R0=6.0288549, Day2=2.779831, R0_int=0.574270)
+
+-1*negloglik(pars=parm, obs=CASES_OBSERVED, tau=0.01)
+
+y = incidence(c(parm, tau=0.01))
+y2 = incidence(c(parm, tau=0.0001))
+summary(100*(y2-y)/y)
+
+max_cases = max(c(y[,1], y2[,1], CASES_OBSERVED))
+
+plot(1:nrow(y), y[,1], ylim=c(0,max_cases), type='l', xlab="Day", ylab="Daily incidence")
+lines(1:nrow(y2), y2[,1], lty=2)
+
+points(round(parm[1]):nrow(y), CASES_OBSERVED, col=2)
+
+library(RcppDE)
+lower = c(1,  1, -10, 1e-3)
+upper = c(100,20 ,20, 1)
+
+set.seed(2)
+tic = Sys.time()
+# Poisson distribution in negloglik
+fit <- DEoptim(fn=negloglik, 
+               lower=lower, 
+               upper=upper,
+               control=DEoptim.control(NP=200,itermax=200,trace=FALSE),
+               obs=CASES_OBSERVED)
+
+(Sys.time() - tic)
+
+fit$optim$bestmem
+fit$optim$bestval 
+(parm = fit$optim$bestmem)
+
+-1*negloglik(pars=unname(parm), obs=CASES_OBSERVED, tau=0.01)
+# names are par1, par2, ..., which are not compatible with the incidence function
+y = incidence(pars=unname(parm))
+# or change with the compatible names 
+# names(parm) = c("Day1", "R0", "Day2", "R0_int")
+# y = incidence(pars=parm)
+
+p1 <- round(parm[1])
+mod = c(sum(y[1:p1, 1]), y[(p1+1):nrow(y), 1])
+dpois(CASES_OBSERVED[1], lambda=mod[1], log=TRUE)
+sum(dpois(CASES_OBSERVED, lambda=mod, log=TRUE))
+
+
+max_cases = max(c(y[,"CumulSymptomatic"], CASES_OBSERVED))
+
+plot(1:nrow(y), y[,1], ylim=c(0,max_cases), type='l', xlab="Day", ylab="Daily incidence")
+points(round(parm[1]):nrow(y), CASES_OBSERVED, col=2)
+
+library(COVID19NorthKorea)
+library(RcppDE)
+
+parm_global = 
+  find_min_DE(fn=negloglik,
+              obs=CASES_OBSERVED,
+              iter=10,
+              control=DEoptim.control(NP=500,
+                                      itermax=500,
+                                      trace=FALSE))
+
+saveRDS(parm_global, paste0("outputs/fits_de_", tstamp(), ".rds"))
+
+lapply(parm_global$fits, function(x) x$optim$bestmem)
+lapply(parm_global$fits, function(x) x$optim$bestval)
+vals = sapply(parm_global$fits, function(x) x$optim$bestval)
+idmin = which.min(vals)
+
+parm_global$fits[[idmin]]$optim$bestmem
+parm_global$min$optim$bestmem
+#       par1       par2       par3       par4 
+# 40.3335609  5.2853668  3.5015421  0.6324351 
+# p <- readRDS("outputs/param_20230511.rds")
+# p$min$optim
+
+```
+
+Fit the deaths
+```{r}
+devtools::load_all()
+parm = c(Day1=35.282966, R0=6.0288549, Day2=2.779831, R0_int=0.574270)
+# names(PARAMETERS)
+y = incidence(parm, state="Dead")
+
+plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily death")
+points(round(parm[1])+1:length(DEATHS_OBSERVED), DEATHS_OBSERVED, col=2)
+
+library(RcppDE)
+lower = c(1,  1, -10, 1e-3)
+upper = c(100,20 ,20, 1)
+
+set.seed(42)
+tic = Sys.time()
+# Poisson distribution in negloglik
+fit <- DEoptim(fn=negloglik, 
+               lower=lower, 
+               upper=upper,
+               control=DEoptim.control(NP=500,itermax=500,trace=T),
+               state="Dead",
+               obs=DEATHS_OBSERVED)
+
+set.seed(42)
+
+lower = c(1,  1, -10, 1e-3, 1e-2)
+upper = c(100,30 ,20, 1, 1e2)
+tic = Sys.time()
+# Poisson distribution in negloglik
+fit <- DEoptim(fn=negloglik, 
+               lower=lower, 
+               upper=upper,
+               control=DEoptim.control(NP=500,itermax=500,trace=T),
+               dist = "negbin", 
+               state="Dead",
+               obs=DEATHS_OBSERVED)
+(Sys.time() - tic)
+
+fit$optim$bestmem
+fit$optim$bestval 
+(parm = fit$optim$bestmem)
+
+-1*negloglik(pars=unname(parm), obs=DEATHS_OBSERVED)
+# names are par1, par2, ..., which are not compatible with the incidence function
+y = incidence(pars=unname(parm)[1:4], state=c("Dead", "CumulSymptomatic"))
+
+p1 <- round(parm[1])
+mod = c(sum(y[1:p1, 1]), y[(p1+1):nrow(y), 1])
+dpois(DEATHS_OBSERVED[1], lambda=mod[1], log=TRUE)
+sum(dpois(DEATHS_OBSERVED, lambda=mod, log=TRUE))
+
+y$day=1:nrow(y)
+df = tidyr::pivot_longer(y, cols=-c("day"))
+library(ggplot2)
+ggplot(df) +
+  geom_line(aes(day, value)) +
+  facet_wrap(~name, nrow=2, scale="free_y")
+
+max_deaths = max(c(y[,"Dead"], DEATHS_OBSERVED))
+    
+plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily deaths", ylim=c(0, max_deaths))
+points((round(parm[1])):nrow(y), DEATHS_OBSERVED, col=2)
+
+plot(1:nrow(y), y[,2], type='l', xlab="Day", ylab="Daily cases")
+points(round(parm[1])+1:length(CASES_OBSERVED), CASES_OBSERVED, col=2)
+```
+
+### DEoptim::DEoptim
+```{r}
+library(DEoptim)
+mapfun <- function(x){
+  x[1] <- round(x[1])
+  x[3] <- round(x[3])
+  return(x)
+}
+
+opt <- 
+   DEoptim::DEoptim(negloglik,
+                    lower=c(1,  1, -10, 1e-3), 
+                    upper=c(100,20 ,20, 1),
+                    control=DEoptim.control(NP=1000,
+                                            itermax=1000,
+                                            trace=FALSE,
+                                            parallelType=1,
+                                            packages=c("COVID19NorthKorea")),
+                    fnMap=mapfun,
+                    obs=CASES_OBSERVED)
+parm = opt$optim$bestmem
+y=incidence(pars=parm)
+p1 <- round(parm[1])
+mod = c(sum(y[1:p1, 1]), y[(p1+1):nrow(y), 1])
+negloglik(parm,obs=CASES_OBSERVED)
+
+plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily incidence")
+points(round(parm[1])+1:length(CASES_OBSERVED), CASES_OBSERVED, col=2)
+
+# bootstrapping
+model = c(sum(y[1:p1, 1]), y[(p1+1):nrow(y), 1])
+# Generate synthetic data mod as the mean
+nboot <- 2000
+# nboot parametric samples of size n; organize in a matrix
+bootdata = replicate(nboot, rpois(length(model), lambda=model))
+
+parms = matrix(NA, nrow=5, ncol=nboot)
+
+for (i in 1:nboot) {
+  cat("i =", i, "\n")
+  # use parallel with ncores - 2
+  outDE <- DEoptim::DEoptim(negloglik,
+                    lower=c(1,  1, -10, 1e-3), 
+                    upper=c(100,20 ,20, 1),
+                    control=DEoptim.control(NP=400,
+                                            itermax=400,
+                                            trace=FALSE,
+                                            parallelType=1,
+                                            packages=c("COVID19NorthKorea")),
+                    fnMap=mapfun,
+                    obs=CASES_OBSERVED)
+  
+  parms[1:4, i] = outDE$optim$bestmem
+  parms[5, i] = outDE$optim$bestval
+}
+
+saveRDS(parms, paste0("outputs/bootstrap_fits_de_", tstamp(),".rds"))
+```
+
+
+### Fit for each region
+```{r fit_region}
+devtools::load_all()
+pop <- readRDS("inst/extdata/pop_by_province_20230213.rds")
+dat <- readRDS("inst/extdata/covid_by_province_20230213.rds")
+
+library(DEoptim)
+
+mapfun <- function(x) {
+  x[1] <- round(x[1])
+  x[3] <- round(x[3])
+  return(x)
+}
+
+lower = c(1,  1, -10, 1e-3)
+upper = c(100,20 ,20, 1) 
+set.seed(3)
+
+fitlist <- vector("list", nrow(pop))
+i = 10
+
+for (i in 1:nrow(pop)){
+  d <- dat[dat$province == pop$Province_Korean[i],]
+  d$day <- 0:(nrow(d)-1)
+  # is this a reasonable assumption
+  case_before <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] + d$`당일 사망자수`[1] - d$`당일 발생자수`[1] 
+
+  OBS <- c(case_before, d $symptomatic)
+
+  PARAMETERS <- initialize_params(obs_length = length(OBS))
+
+
+  fitlist[[i]] <- DEoptim(fn=negloglik,
+                 lower=lower, 
+                 upper=upper,
+                 control=DEoptim.control(NP=400,
+                                         itermax=400,
+                                         trace=FALSE,
+                                         parallelType=1,
+                                         parVar=c("PARAMETERS","OBS"), 
+                                         packages=c("COVID19NorthKorea")),
+                 fnMap=mapfun,
+                 obs=OBS)
+}
+
+saveRDS(fitlist, paste0("outputs/fit_region_", tstamp(), ".rds"))
+
+# (parm = fit$optim$bestmem)
+# 
+# fit$optim
+# 
+# negloglik(parm,obs)
+# 
+# y <- incidence(pars=parm)
+# 
+# p1 <- round(parm[1])
+# mod = c(sum(y[1:p1+1, 1]), y[(p1+2):nrow(y), 1])
+# 
+# mx = max(c(y[,1], mod, obs), na.rm=T)
+# plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily incidence", ylim=c(0,mx))
+# points((p1+1):nrow(y), mod)
+# points((p1+1):nrow(y), obs, pch='+', col=2)
+```
+
+
+```{r}
+codes_pois_seapird <- "model {
+   
+    for (i in 1:N) { 
+      y[i] ~ dpois(mu[i]) # likelihood
+      log(mu[i]) <- alpha + inprod(X[i,], beta) 
+      ypred[i] ~ dpois(mu[i]) # posterior predictive
+    }
+
+    for (j in 1:np) {
+      beta[j] ~ dnorm(0, 100^2)
+    }
+    
+    alpha ~ dnorm(0, 100^-2)
+  }"
+
+```
+## Pois - Vanialla
+```{r}
+ag <- ags[3]
+model_codes <- codes_pois_seapird
+# mcmc parameters
+niter <- 1000000
+nburn <- 200000
+nthin <- 1000
+nchains <- 2
+
+mod_type <- "Pois_Vanilla"
+print(paste("age =", ag, ", ", mod_type, "started"))
+# data
+d <- dat[age_grp_new == ag]
+
+# X <- d[, covstr_baseline, with=FALSE]
+# if(ag %in% ags[1:2]) X <- X[, (covstr_drop_0_4y) := NULL]
+# X <- as.matrix(X)
+# 
+# np <- ncol(X)
+# for (i in 1:np) {
+#   X[,i] <- (X[,i] - mX[colnames(X)[i]]) / sdX[colnames(X)[i]]
+# }
+
+y = round(unlist(d[, ir_str, with=FALSE]))
+N = length(y)
+
+data = list(y=y, X=X, N=N, np=np) #
+inits = list(alpha=0, beta=rep(1,np))
+
+model = jags.model(textConnection(model_codes),
+                   n.chains = nchains,
+                   data = data,
+                   inits = inits)
+
+params_to_track <- c("alpha", "beta", "ypred")
+update(model, n.iter=nburn) # burn-in
+output = coda.samples(model = model,
+        variable.names = params_to_track,
+        n.iter = niter, n.chains = nchains, thin = nthin)
+
+mcmcplot(output, dir = "plots/mcmcplots/",
+         filename = paste0("mcmc_", mod_type, "_", sub("\\D*(\\d+).*", "\\1", ag),
+                           "y_", tstamp(hour=T, minute = T)))
+
+ggd <- ggs(output)
+a <- ggd$value[which(ggd$Parameter == "alpha")]
+b <- ggd$value[grepl("^beta\\[", ggd$Parameter)]
+ypred <- ggd$value[grepl("^ypred\\[", ggd$Parameter)]
+ypredmat <- matrix(ypred, nrow=N, byrow=T)
+
+pred_summary <- apply(ypredmat, 1, quantile,
+                      probs=probs)
+
+pred_mean <- apply(ypredmat, 1, mean)
+res = data.frame(obs = y,
+                 pred_025 = pred_summary["2.5%",],
+                 pred_16 = pred_summary["16%",],
+                 pred_5 = pred_summary["50%",],
+                 pred_84 = pred_summary["84%",],
+                 pred_975 = pred_summary["97.5%",], 
+                 mean = pred_mean)
+
+names(res) <- c("obs", paste0(probs*100, "%"), "mean")
+
+p <- obs_pred_plot(res)
+p <- p + ggtitle(paste0(ag, "_", mod_type))
+p
+ggsave(plot=p, paste0("plots/fit_", mod_type, "_",
+              sub("\\D*(\\d+).*", "\\1", ag), "y_",
+              tstamp(hour=T, minute=T), ".png"), width=7.4, height=7.4, units="in")
+
+## Predict 
+Xpd <- Xpred[, !(colnames(Xpred) %in% covstr_drop_0_4y)]
+pred <- predict_ir(X=Xpd, output=output, np=ncol(Xpd))
+
+saveRDS(pred, paste0("outputs/pred_IR_", mod_type, "_",
+sub("\\D*(\\d+).*", "\\1", ag), "y_", tstamp(hour=T,minute=T), ".rds"))
+                    
+rst <- cov_rst_baseline[[1]]
+val <- pred["50%",]
+val[val > MAX_IR] <- MAX_IR
+rst[] <- val
+# plot(rst)
+names(rst) <- "incidence_rate_1e5pyo"
+
+rat <- map_ratio(rst) # to make the ratio of the output map same as the input map
+## ggplot2
+rmask <- mask(rst, afss)
+rpts <- rasterToPoints(rmask)
+rptsdf <- as.data.frame(rpts)
+colnames(rptsdf) <- c("lon", "lat", "ir")
+rptsdf$ir <- as.double(rptsdf$ir + 1) # 1 is added to use log transformation
+# summary(rptsdf$ir)
+# arbitrary maximum incidence rate  
+rptsdf$ir[rptsdf$ir > MAX_IR] <- MAX_IR
+# identify a way to plot the incidence rate on a log scale
+library(ggplot2)  
+p <- IR_plot(data = rptsdf)
+p <- p + ggtitle(paste0(ag, "_", mod_type))
+
+ggsave(plot=p, paste0("plots/pred_IR_", sub("\\D*(\\d+).*", "\\1", ag), "y_", mod_type, "_", tstamp(hour = T, minute = T), ".png"), width=7.4, height=7.4*rat, units="in")
+
+## LOO
+n_leave_out <- N
+params_to_track <- c("alpha", "beta", "ypred")
+res <- loo_jags(y=y, X=X, data=data, nlo=n_leave_out,
+                nchains=nchains, nburn=nburn,
+                niter=niter, nthin=nthin, inits=inits,
+                modelcodes=model_codes,
+                parameters_to_track=params_to_track,
+                mcmcplot=TRUE)
+
+saveRDS(res, paste0("outputs/LOO_", mod_type, "_",
+sub("\\D*(\\d+).*", "\\1", ag), "y_", tstamp(hour=T,minute=T), ".rds"))
+
+p <- obs_pred_plot(res)
+p <- p + ggtitle(paste0(ag, "_", mod_type))
+
+ggsave(plot=p, paste0("plots/LOO_", mod_type, "_",
+sub("\\D*(\\d+).*", "\\1", ag), "y_", tstamp(hour=T,minute=T), ".png"),
+width=7.4, height=7.4, units="in")
+```
+
+1. Test whether three parameters (i0,R0,R*) work well for the Bayesian
+2. See if I could write the NLL for the hierarchical model 
+```{r}
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+OBS <- c(case_before, d$symptomatic)
+PARAMETERS <- initialize_params(obs_length = length(OBS))
+# Day 1 and Day 2 are integers
+lower = c(0,  1, 1e-3)
+upper = c(1, 20, 1) 
+set.seed(3)
+
+negloglik(parm, OBS)
+
+# Poisson distribution in negloglik
+library(DEoptim)
+fit <- DEoptim(fn=negloglik,
+               lower=lower, 
+               upper=upper,
+               control=DEoptim.control(NP=200,
+                                       itermax=200,
+                                       trace=FALSE,
+                                       parallelType=1,
+                                       parVar=c("PARAMETERS","OBS"), 
+                                       packages=c("COVID19NorthKorea")),
+               fnMap=mapfun,
+               obs=OBS)
+
+# saveRDS(fit, "outputs/fit_20230527.rds")
+
+(parm = fit$optim$bestmem)
+
+fit$optim
+
+negloglik(parm,obs)
+
+y <- incidence(pars=parm)
+
+p1 <- round(parm[1])
+mod = c(sum(y[1:p1+1, 1]), y[(p1+2):nrow(y), 1])
+
+mx = max(c(y[,1], mod, obs), na.rm=T)
+plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily incidence", ylim=c(0,mx))
+points((p1+1):nrow(y), mod)
+points((p1+1):nrow(y), obs, pch='+', col=2)
+
+```
+
