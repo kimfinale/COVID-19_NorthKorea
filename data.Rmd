@@ -57,3 +57,125 @@ r = -log(0.417)/dur
 
 ```
 
+
+
+#### Data preparation
+Prepare data for the region - population and initially infected
+In particular, 함북 = 함북 + 나선, 황북 = 황북 + 개성 as we don't have the population size for 나선 and 개성.
+This is used for hierarchical modeling
+```{r}
+# library(COVID19NorthKorea)
+library(nimble) # this should come before load_all() because one of the package files uses nimbleFunction
+devtools::load_all()
+dlist <- rio::import_list("inst/extdata/(2022-0811)_코로나19_조선중앙TV_보도_현황표_시도별_일일유열자.xlsx")
+nm <- names(dlist)[2:length(dlist)]
+caselist <- vector("list", length(nm))
+
+for (i in 1:length(nm)) {
+  df <- dlist[[i+1]]
+  # add a few columns to easier management and plotting
+  df$case <- df$`당일 발생자수`
+  df$date <- extract_dates(df$기준시)
+  df$province <- nm[i]
+  # df <- dplyr::full_join(fulldate_df, df, by="date")
+  caselist[[i]] <- df
+}
+
+mindate <- min(do.call("c", (lapply(caselist, function(x) min(x$date)))))
+maxdate <- max(do.call("c", (lapply(caselist, function(x) max(x$date)))))
+
+fulldate_df <- data.frame(date = seq(mindate, maxdate, by="day"))
+
+for (i in 1:length(nm)) {
+  df <- caselist[[i]]
+  fulldate_df$province <- df$province[1]
+  df <- dplyr::full_join(fulldate_df, df, by="date")
+  df <- dplyr::rename(df, province = province.x)
+  caselist[[i]] <- df
+}
+
+dat <- do.call("rbind", caselist)
+dat <- dat[, !names(dat) %in% c("province.y")]
+
+
+# population data based on 2008 census
+pop <- readxl::read_xlsx("inst/extdata/census_2008.xlsx")
+unique(df$province)
+pop <- dplyr::rename(pop, province_English = Province)
+pop$province <- c("양강","함북","함남","강원","자강","평북","평남",
+                  "황북","황남","평양","남포")
+
+# pop <- readRDS("inst/extdata/pop_by_province_20230213.rds")
+# dat <- readRDS("inst/extdata/covid_by_province_20230213.rds")
+prov = unique(dat$province)
+# merge cases into 함북 = 함북 + 나선, 황북 = 황북 + 개성
+d <- dat[dat$province %in% c("함북","나선","황북","개성"),]
+dat0 <- dat[!dat$province %in% c("함북","나선","황북","개성"),]
+
+d1 <- d[d$province == "함북",]
+d2 <- d[d$province == "나선",] 
+d12 <- dplyr::full_join(d1, d2, by="date")
+library(tidyr)
+d12$기준시 <- d12$기준시.x
+d12$보도일 <- d12$보도일.x
+# update the number of cases for 함북
+d12$`치료중 환자수` <- d12$`치료중 환자수.x` + d12$`치료중 환자수.y`
+d12$`당일 발생자수` <- d12$`당일 발생자수.x` + d12$`당일 발생자수.y`
+d12$`당일 완쾌자수` <- d12$`당일 완쾌자수.x` + d12$`당일 완쾌자수.y`
+d12$`당일 사망자 수` <- d12$`당일 사망자 수.x` + d12$`당일 사망자 수.y`
+d12$case <- d12$case.x + d12$case.y
+
+# d12$symptomatic <- d12$symptomatic.x + d12$symptomatic.y
+d12$province <- "함북"
+d12_slim <- d12[,names(d1)]
+
+d3 <- d[d$province == "황북",]
+d4 <- d[d$province == "개성",] 
+d34 <- dplyr::full_join(d3, d4, by="date")
+library(tidyr)
+d34$기준시 <- d34$기준시.x
+d34$보도일 <- d34$보도일.x
+# update the number of cases for 황북
+d34$`치료중 환자수` <- d34$`치료중 환자수.x` + d34$`치료중 환자수.y`
+d34$`당일 발생자수` <- d34$`당일 발생자수.x` + d34$`당일 발생자수.y`
+d34$`당일 완쾌자수` <- d34$`당일 완쾌자수.x` + d34$`당일 완쾌자수.y`
+d34$`당일 사망자 수` <- d34$`당일 사망자 수.x` + d34$`당일 사망자 수.y`
+d34$case <- d34$case.x + d34$case.y
+d34$province <- "황북"
+d34_slim <- d34[, names(d1)]
+
+datnew <- rbind(rbind(dat0, d12_slim), d34_slim)
+prov <- unique(datnew$province)
+sum(is.na(datnew$date))
+sum(is.na(datnew$province))
+# for (i in 1:length(prov)) {
+#   print(nrow(datnew[datnew$province == prov[i],]))
+# } 
+
+y <- matrix(NA, nrow=nrow(d1), ncol=length(prov))
+for (i in 1:length(prov)) {
+  y[,i] <- datnew[datnew$province == prov[i],]$case
+}
+library(dplyr)
+
+df <- data.frame(matrix(NA, nrow=length(unique(datnew$province)), 
+                             ncol=3))
+names(df) <- c("province", "pop", "inf0")
+df$province <- prov
+for (i in 1:nrow(df)) {
+  df$pop[i] <- pop[pop$province == df$province[i],]$Total
+  d <- datnew[datnew$province == df$province[i], ]
+  df$inf0[i] <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] + d$`당일 사망자 수`[1] - d$`당일 발생자수`[1]
+}
+# y time-series data
+# df population size, initially infected, prove
+# ----------------------------------------------------------
+nkcovid = vector('list', 3)
+nkcovid[[1]] = datnew
+nkcovid[[2]] = y
+nkcovid[[3]] = df
+names(nkcovid) = c("covid", "incidence", "pop")
+usethis::use_data(nkcovid, overwrite=TRUE)
+```
+
+

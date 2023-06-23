@@ -11,16 +11,17 @@ initialize_params <- function(...) {
   params$cumul_infected <- 0
   params$cumul_symptomatic <- 0
 
-# 4 parameters to be estimated
-  params$Day1 <- 30 # introduction happened "Day1" days before May 12 (reported)
-  params$Day2 <- 1 # intervention "Day2" days after May 12
+
+  params$Day1 <- 0 # introduction happened "Day1" days before May 12 (reported)
+  params$Day2 <- 4 # intervention "Day2" days after May 12
+# 3 parameters to be estimated
+  params$prop_inf <- 0.01
   params$R0 <- 6.0
   params$R0_int <- 0.6 # R0 after intervention is in place
 
   params$model <- seapird_euler
   # params$erlang <- FALSE
   # params$region <- "overall"
-
   params$epsilon <- 1/2.7 # mean latent period = 1/epsilon. Jiang (2023) Chinese doi:10.3760/cma.j.cn112150-20220926-00925
   params$delta <- 1/3.4 # mean incubation period = 1/delta. Wu (2022) JAMA Network Open doi:10.1001/jamanetworkopen.2022.28008
   params$gamma <- 1/5 # mean infectious period = 1/gamma. Takahashi (2022) EID doi:10.3201/eid2805.220197
@@ -35,12 +36,12 @@ initialize_params <- function(...) {
   params$bA <- 1 # relative infectiousness of asymptomatic state
   params$cfr <- 0.0304 # case fatality ratio Wang(2023) JMV doi:10.1002/jmv.28118
 
-  params$tau <- 0.01 # time step size
+  params$tau <- 0.1 # time step size
   params$ndays <- 100.0 # number of days for output
   params$day_intervention <- 100.0
 
   # North Korea data have >80 observations, ignoring some zero incidence at the end
-  params$obs_length <- 80
+  params$obs_length <- 74
 
 
   # update parameters
@@ -51,7 +52,10 @@ initialize_params <- function(...) {
     params[[nm]] = par[[nm]]
   }
 
-  params[["susceptible"]] <- params[["population"]] - params[["symptomatic"]]
+  fa <- params[["fA"]]
+  params[["asymptomatic"]] <- params[["symptomatic"]] * (fa)/(1-fa)
+  infecteds <- params[["asymptomatic"]] + params[["symptomatic"]]
+  params[["susceptible"]] <- params[["population"]] - infecteds
   # simulation times changes by Day 1 (introduction of the virus)
   # + 1 because observation is assumed to be the difference between the time steps
   params[["ndays"]] <- round(params[["Day1"]]) + params[["obs_length"]] + 1

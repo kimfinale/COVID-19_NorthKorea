@@ -1180,16 +1180,19 @@ width=7.4, height=7.4, units="in")
 1. Test whether three parameters (i0,R0,R*) work well for the Bayesian
 2. See if I could write the NLL for the hierarchical model 
 ```{r}
+devtools::load_all()
 d = readRDS("inst/extdata/covid_overall_20230122.rds")
 case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
-OBS <- c(case_before, d$symptomatic)
+OBS <- d$symptomatic
 PARAMETERS <- initialize_params(obs_length = length(OBS))
 # Day 1 and Day 2 are integers
-lower = c(0,  1, 1e-3)
-upper = c(1, 20, 1) 
+i0 <- case_before / PARAMETERS$population
+PARAMETERS$prop_inf <- i0
+lower = c(1, 1e-3)
+upper = c(20, 1) 
 set.seed(3)
 
-negloglik(parm, OBS)
+negloglik(c(0.01,6,0.6), OBS)
 
 # Poisson distribution in negloglik
 library(DEoptim)
@@ -1198,11 +1201,7 @@ fit <- DEoptim(fn=negloglik,
                upper=upper,
                control=DEoptim.control(NP=200,
                                        itermax=200,
-                                       trace=FALSE,
-                                       parallelType=1,
-                                       parVar=c("PARAMETERS","OBS"), 
-                                       packages=c("COVID19NorthKorea")),
-               fnMap=mapfun,
+                                       trace=TRUE),
                obs=OBS)
 
 # saveRDS(fit, "outputs/fit_20230527.rds")
@@ -1210,18 +1209,1235 @@ fit <- DEoptim(fn=negloglik,
 (parm = fit$optim$bestmem)
 
 fit$optim
-
-negloglik(parm,obs)
+obs = OBS
+negloglik(parm, OBS)
 
 y <- incidence(pars=parm)
-
-p1 <- round(parm[1])
-mod = c(sum(y[1:p1+1, 1]), y[(p1+2):nrow(y), 1])
-
+mod = y[,1]
 mx = max(c(y[,1], mod, obs), na.rm=T)
 plot(1:nrow(y), y[,1], type='l', xlab="Day", ylab="Daily incidence", ylim=c(0,mx))
-points((p1+1):nrow(y), mod)
-points((p1+1):nrow(y), obs, pch='+', col=2)
+points(1:nrow(y), mod)
+points(1:nrow(y), obs, pch='+', col=2)
+```
 
+
+### BayesianTools package - MCMC
+```{r}
+devtools::load_all()
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+OBS <- d$symptomatic
+PARAMETERS <- initialize_params(obs_length = length(OBS))
+# Day 1 and Day 2 are integers
+i0 <- case_before / PARAMETERS$population
+PARAMETERS$prop_symp <- i0
+
+set.seed(3)
+
+
+loglik <- function(pars, obs=OBS, ...) {
+
+  inc <- incidence(pars=pars, ...)
+  if (ncol(inc) > 1) {
+    stop("More than one column in the daily incidence output")
+  }
+  model <- inc[, 1]
+  if (any(model < 0)) {
+    ll <- -Inf
+  } else {
+    # ll <- sum(dpois(obs, model, log=TRUE), na.rm=TRUE)
+    ll <- sum(dnbinom(obs, size=pars[3], mu=model, log=TRUE), na.rm=T)
+  }
+  return(ll)
+}
+
+library(BayesianTools)
+setup <- createBayesianSetup(likelihood = loglik, 
+                             lower = c(1+1e-6, 1e-6, 1e-6),
+                             upper = c(30 , 1-1e-6, 1e3))
+
+settings <- list(iterations=5e4, adapt=T, DRlevels=1, 
+                 nrChains=4, gibbsProbabilities = NULL,
+                 temperingFunction=NULL,
+                 optimize=F, message=FALSE)
+# 
+out <- runMCMC(bayesianSetup=setup, 
+               sampler="Metropolis", settings = settings)
+summary(out)
+plot(out)
+
+# print(out)
+# summary(out)
+# summary(out$chain[sample(2.5e5:5e5, 1e4),])
+# # tracePlot(out)
+# tracePlot(out$chain[sample(2.5e5:5e5, 1e4),])
+# correlationPlot(out)
+# marginalPlot(out)
+
+
+# settings <- list(initialParticles=2e3, iterations=2e3, adaptive=T)
+# out <- runMCMC(bayesianSetup = setup, sampler = "SMC", settings = settings)
+
+```
+
+
+### Test Hierarchical model
+
+NIMBLE package
+```{r}
+## load the NIMBLE library
+library(deSolve)
+
+sir_euler <- function(beta) {
+  tend <- 100
+  dt <- 0.1
+  St <- 999
+  It <- 1
+  Rt <- 0
+  CIt <- 0
+  
+  S <- I <- R <- CI <- rep(NA, tend)
+  S[1] <- St
+  I[1] <- It
+  R[1] <- Rt
+  CI[1] <- CIt
+  
+  gamma <- 0.2
+
+ 
+  for (i in 2:tend) {
+    for (j in 1:ceiling(1/dt)) {
+      Nt <- St + It + Rt
+      rate_StoI <- St * beta * It / Nt * dt
+      rate_ItoR <- gamma * It * dt
+  
+      dS <- - rate_StoI
+      dI <- rate_StoI - rate_ItoR
+      dR <- rate_ItoR
+      dCI <- rate_StoI
+    
+      St <- St + dS
+      It <- It + dI
+      Rt <- Rt + dR
+      CIt <- CIt + dCI
+      
+    }
+    S[i] <- St 
+    I[i] <- It
+    R[i] <- Rt
+    CI[i] <- CIt
+  }
+  
+  return (diff(CI))
+}
+
+true_inc <- sir_euler(beta=0.3)
+set.seed(42)
+# observation based on poisson dist
+obs <- rpois(length(true_inc), lambda=true_inc)
+##
+sir_incidence <- nimbleFunction(
+  run = function(beta = double(0)) {
+    tend <- 100
+    dt <- 0.1
+    
+    St <- 999
+    It <- 1
+    Rt <- 0
+    CIt <- 0
+  
+    S <- rep(0, tend)
+    I <- rep(0, tend)
+    R <- rep(0, tend) 
+    CI <- rep(0, tend)
+    
+    S[1] <- St
+    I[1] <- It
+    R[1] <- Rt
+    CI[1] <- CIt
+  
+    gamma <- 0.2
+    
+    for (i in 2:tend) {
+      for (j in 1:ceiling(1/dt)) {
+        Nt <- St + It + Rt
+        rate_StoI <- St * beta * It / Nt * dt
+        rate_ItoR <- gamma * It * dt
+  
+        dS <- - rate_StoI
+        dI <- rate_StoI - rate_ItoR
+        dR <- rate_ItoR
+        dCI <- rate_StoI
+      
+        St <- St + dS
+        It <- It + dI
+        Rt <- Rt + dR
+        CIt <- CIt + dCI
+      }
+      S[i] <- St 
+      I[i] <- It
+      R[i] <- Rt
+      CI[i] <- CIt
+   }
+   inc <- CI[2:tend] - CI[1:(tend-1)] 
+   return(inc)
+   returnType(double(1))
+ }
+)
+
+library(nimble, warn.conflicts = FALSE)
+code <- nimbleCode({
+  beta ~ dnorm(0, sd = 10)
+  mu[1:N] <- sir_incidence(beta) 
+  for (i in 1:N) {
+    y[i] ~ dpois(mu[i])
+  }
+})
+
+## constants, data, and initial values
+constants <- list(N = length(obs))
+data <- list(y = obs)
+inits <- list(beta = 0.1)
+## create the model object
+sir_model <- nimbleModel(code = code,
+                         constants = constants, data = data,
+                         inits = inits, check = FALSE)
+
+sir_model$getVarNames()
+sir_model$getNodeNames()
+sir_model$getDistribution('beta')
+sir_model$simulate("mu")
+sir_model$mu
+
+plot(sir_model$getGraph())
+
+sirMCMC <- buildMCMC(sir_model)
+CsirMCMC <- compileNimble(sirMCMC)
+
+CsirMCMC$beta <- 0.1
+CsirMCMC$calculate() ## all nodes by default
+
+samples <- runMCMC(sirMCMC, niter = 10000)
+Csamples <- runMCMC(CsirMCMC, niter = 10000)
+
+```
+
+
+```{r}
+set.seed(42)
+R <- 20
+hyper_beta_mu <- 0.4
+hyper_beta_sd <- 0.1
+betavec <- rep(NA, R)
+true_inc <- matrix(NA, nrow=99, ncol=R)
+obs_inc <- matrix(NA, nrow=99, ncol=R)
+for (i in 1:R) {
+  betavec[i] <- rnorm(1, hyper_beta_mu, hyper_beta_sd)
+  true_inc[,i] <- sir_euler(beta=betavec[i])
+  obs_inc[,i] <- rpois(length(true_inc[,i]), lambda=true_inc[,i])
+}
+obs_inc[runif(5,1,100),1] <- NA
+library(nimble, warn.conflicts = FALSE)
+
+code <- nimbleCode({
+  beta_mu ~ dnorm(0, sd = 10)
+  beta_sd ~ dexp(1)
+  for (j in 1:R) {
+    beta[j] ~ dnorm(beta_mu, sd = beta_sd)
+    mu[1:N, j] <- sir_incidence(beta[j])
+    for (i in 1:N) {
+      y[i, j] ~ dpois(mu[i, j])
+    }
+  }
+})
+
+## constants, data, and initial values
+const <- list(N=nrow(obs_inc), R=R)
+y <- obs_inc
+
+data <- list(y=y)
+inits <- list(beta_mu=0.5, beta_sd=1, 
+              beta=rep(0.4, const$R))
+## create the model object
+sir_model <- nimbleModel(code = code,
+                         constants = const,
+                         data = data,
+                         inits = inits, check = FALSE)
+
+# sir_model$getVarNames()
+# sir_model$getNodeNames()
+# sir_model$getDistribution('beta')
+# sir_model$simulate("mu")
+# sir_model$mu
+
+# plot(sir_model$getGraph())
+
+sirMCMC <- buildMCMC(sir_model, 
+                     monitors=c('beta_mu', 'beta_sd', "beta"))
+CsirMCMC <- compileNimble(sir_model)
+CsirMCMC <- compileNimble(sirMCMC)
+
+# CsirMCMC$beta <- 0.1
+# CsirMCMC$calculate() ## all nodes by default
+
+# samples <- runMCMC(sirMCMC, niter = 1000)
+Csamples <- runMCMC(CsirMCMC, niter = 2000)
+Csamples$summary
+plot(Csamples)
+plot(Csamples[,1], type="l")
+plot(Csamples[,2], type="l")
+
+
+sir_incidence <- nimbleFunction(
+  run = function(beta = double(0)) {
+    inc <- incidence(c(0,5,1,0.2)) 
+    return(inc)
+    returnType(double(1))
+ }
+)
+```
+
+
+
+### Hierarchical model
+
+
+nimble function to take advantage of incidence function, which has already been written in C++
+```{r}
+# seapird_incidence <- nimbleFunction(
+#   run = function(R0=double(0), 
+#                  R_int=double(0),
+#                  pop=double(0),
+#                  inf0=double(0)) {
+#     PARAMETERS <- initialize_params(population=pop, symptomatic=inf0)
+#     inc <- incidence(c(R0, R_int))
+#     return(inc[,1])
+#     returnType(double(1))
+#   }
+# )
+```
+
+
+Hierarchical model
+```{r}
+library(nimble)
+devtools::load_all()
+source("R/nimble_seapird.R")
+# inc = seapird_incidence(R0=6, R_int=0.6, pop=df$pop[1], inf0=df$inf0[1])
+inc = nimble_seapird(R0=6, R_int=0.6, pop=df$pop[1], inf0=df$inf0[1],
+                     day2=4L)
+dpois(y[,1], lambda=inc)
+
+
+code_complete <- nimbleCode({ # complete pooling
+  R0 ~ dnorm(0, sd = 10)
+  R_int ~ dnorm(0, sd = 1)
+  
+  mu[1:N] <- nimble_seapird(R0=exp(R0), 
+                            R_int=exp(R_int),
+                            pop=x[1],
+                            inf0=x[2], 
+                            day2=4L)
+  for (i in 1:N) {
+    y[i] ~ dpois(mu[i])
+  }
+})
+```
+
+#### Complete pooling
+```{r}
+# complete pooling
+code <- code_complete
+data <- list(y=rowSums(y), x=colSums(df[,c(2,3)]))
+const <- list(N=nrow(y))
+inits <- list(R0=5, R_int=0.6)
+
+## create the model object
+model <- nimbleModel(code = code,
+                     constants = const,
+                     data = data,
+                     inits = inits, check = FALSE)
+
+# plot(sir_model$getGraph())
+Cmodel <- compileNimble(model)
+mcmc <- buildMCMC(model, monitors=c('R0','R_int'))
+
+Cmcmc <- compileNimble(mcmc, project=Cmodel)
+
+samples <- runMCMC(Cmcmc, niter=100000, nchains=4)
+saveRDS(samples, paste0("outputs/complete_pooling_samples_", tstamp(hour=T,minute=T), ".rds"))
+```
+
+#### No pooling
+```{r}
+# no pooling
+code <- code_complete
+obs = y
+for (i in 1:ncol(obs)) {
+  cat("i =", i, "\n")
+  data <- list(y=obs[,i], x=colSums(df[i,c(2,3)]))
+  const <- list(N=nrow(obs))
+  inits <- list(R0=5, R_int=0.6)
+  
+  ## create the model object
+  model <- nimbleModel(code = code,
+                       constants = const,
+                       data = data,
+                       inits = inits, check = FALSE)
+  
+  # plot(sir_model$getGraph())
+  Cmodel <- compileNimble(model)
+  mcmc <- buildMCMC(model, monitors=c('R0','R_int',"mu"))
+  
+  Cmcmc <- compileNimble(mcmc, project=Cmodel)
+  
+  samples <- runMCMC(Cmcmc, niter=100000, nchains=4)
+  saveRDS(samples, paste0("outputs/no_pooling_samples_", i, "_", tstamp(hour=T), ".rds"))
+}  
+```
+
+
+#### Partial pooling
+```{r}
+# partial pooling 
+# constants, data, and initial values
+code_partial <- nimbleCode({ # partial pooling
+  R0_mu ~ dnorm(0, sd = 10)
+  R0_sd ~ dexp(1)
+  R_int_mu ~ dnorm(0, sd=1)
+  size ~ dexp(10)
+  for (j in 1:R) {
+    R0[j] ~ dnorm(R0_mu, sd = R0_sd)
+    R_int[j] ~ dnorm(R_int_mu, sd = R0_sd)
+    mu[1:N, j] <- nimble_seapird(R0=exp(R0[j]), 
+                                 R_int=exp(R_int[j]),
+                                 pop=x[j,1],
+                                 inf0=x[j,2],
+                                 day2=4L)
+    for (i in 1:N) {
+      # y[i, j] ~ dpois(mu[i, j])
+      y[i, j] ~ dnegbin(size/(size+mu[i,j]), size)
+    }
+  }
+})
+
+code <- code_partial
+const <- list(N=nrow(y), R=ncol(y))
+data <- list(y=y, x=df[,c(2,3)])
+inits <- list(R0_mu=2, R0_sd=1,
+              R0=rep(2, const$R),
+              R_int_mu=0.6,
+              R_int=rep(0.6, const$R))
+
+## create the model object
+model <- nimbleModel(code = code,
+                     constants = const,
+                     data = data,
+                     inits = inits, check = FALSE)
+
+model$initializeInfo()
+model$calculate()
+
+model_conf <- configureMCMC(model)
+# to check the default sampler
+model_conf$printSamplers()
+
+# model$getVarNames()
+# model$getNodeNames()
+# model$getDistribution('beta')
+# model$simulate("mu")
+# model$mu
+
+# plot(sir_model$getGraph())
+Cmodel <- compileNimble(model)
+mcmc <- buildMCMC(model, monitors=c('R0_mu','R0_sd','R0','R_int_mu','R_int'))
+
+Cmcmc <- compileNimble(mcmc, project=Cmodel)
+  
+samples <- runMCMC(Cmcmc, niter=100000, nchains=4)
+saveRDS(samples, paste0("outputs/samples_negbin_", tstamp(hour=T), ".rds"))
+
+# summary(samples)
+# for (i in 1:ncol(samples$chain1)) {
+#   # plot(samples[,i], type="l", main=i)
+#   plot(sample(samples$chain1[,i], size=1e3), type="l", main=i)
+# }
+
+# Hamiltonian Monte Carlo
+## Compile not working as of 15 June 2023
+# model <- nimbleModel(code = code,
+#                      constants = const,
+#                      data = data,
+#                      inits = inits, check = FALSE, 
+#                      buildDerivs = T)
+# Cmodel <- compileNimble(model)
+# 
+# library(nimbleHMC)
+# hmc <- buildHMC(Cmodel, monitors=c('R0_mu','R0_sd','R0','R_int_mu','R_int'))
+# Chmc <- compileNimble(hmc)
+#   
+# samples <- runMCMC(Cmcmc, niter=100000, nchains=4)
+# coda_samples <- runMCMC(Cmcmc, niter=100000, nchains=4, samplesAsCodaMCMC=TRUE)
+# saveRDS(samples, paste0("outputs/hmc_samples_", tstamp(hour=T,minute=T), ".rds"))
+
+```
+
+
+#### Chain diagnostics
+```{r}
+smp = readRDS("outputs/coda_samples_20230613T1906.rds")
+# smp <- readRDS("outputs/samples_20230613T1838.rds")
+library(coda)
+# m <- cbind(smp$chain1[,1], smp$chain2[,1], smp$chain3[,1], smp$chain4[,1])
+# remove the first 10,000 iterations (warm-up)
+c1 <- mcmc(smp$chain1)
+c2 <- mcmc(smp$chain2)
+c3 <- mcmc(smp$chain3)
+c4 <- mcmc(smp$chain4)
+mcchains = mcmc.list(c1,c2,c3,c4)
+rhat = gelman.diag(mcchains)
+gelman.plot(mcchains)
+acf(c1[,1])
+pairs(as.matrix(c1[,1:11]))
+
+# parameter distributions use thinning and remove burn-in period
+thin = 10
+id = seq(2e4+1, 1e5, by=thin)
+lst <- list()
+lst[[1]] <- smp$chain1[id,]
+lst[[2]] <- smp$chain2[id,]
+lst[[3]] <- smp$chain3[id,]
+lst[[4]] <- smp$chain4[id,]
+chain = do.call("rbind", lst)
+# plot(m1)
+chaindf = as.data.frame(chain)
+library(ggplot2)
+d = chaindf[,1:11]
+names(d) = LETTERS[1:11]
+d$grp = 1:nrow(d)
+d = tidyr::pivot_longer(d, cols=-c(grp))
+# d$id <- rep(1:11, each=length(chaindf[,1]))
+d$value = exp(d$value)
+ggplot(d, aes(name, value, group=grp)) +
+  geom_line()+
+  geom_errorbar(data=npdatasum, 
+                aes(x=name1, y=`50%`, ymin=`2.5%`, ymax=`97.5%`), 
+                inherit.aes=FALSE)+
+  scale_y_continuous(limits=c(0,20))
+#
+
+smp_nopool = vector("list", 11) #
+for (i in 1:11) {
+  smp_nopool[[i]] = 
+    readRDS(paste0("outputs/no_pooling_samples_", i, "_20230615.rds"))
+}
+
+d1 = lapply(smp_nopool, function(x) x$chain1[id, 1])
+d1wide = do.call("cbind", d1)
+d2 = lapply(smp_nopool, function(x) x$chain2[id, 1])
+d2wide = do.call("cbind", d2)
+d3 = lapply(smp_nopool, function(x) x$chain3[id, 1])
+d3wide = do.call("cbind", d3)
+d4 = lapply(smp_nopool, function(x) x$chain4[id, 1])
+d4wide = do.call("cbind", d4)
+
+npdata = rbind(d1wide, d2wide, d3wide, d4wide)
+# npdata = as.data.frame(t(npdata))
+# npdata$name1 = LETTERS[1:11]
+
+npdatasum = as.data.frame(t(apply(exp(npdata), 2, quantile, probs=c(0.025,0.25,0.5,0.75,0.975))))
+npdatasum$name1 = LETTERS[1:11]
+
+
+
+
+
+npdatalong = tidyr::pivot_longer(npdata, cols=-name1)
+
+npdatasumlong = tidyr::pivot_longer(npdatasum, c1:11)
+
+np = t(sapply(smp_nopool, function(x) quantile(x$chain1[,], probs=c(0.025,0.25,0.5,0.75,0.975))))
+
+plot(1:11, exp(c1[1,1:11]), type="l", col="grey")
+for (i in 2:nrow(c1)) {
+  lines(1:11, exp(c1[i,1:11]), col="grey")
+  lines(1:11, exp(c2[i,1:11]), col="steelblue")
+  lines(1:11, exp(c3[i,1:11]), col="darkred")
+  lines(1:11, exp(c4[i,1:11]), col="green")
+}
+
+summary(exp(smp1$chain1[id,1]))
+
+```
+
+#### Plot
+```{r}
+# read in the mcmc sample and prepare for the simulation
+# smp = readRDS("outputs/coda_samples_20230613T1906.rds")
+smp = readRDS("outputs/samples_day_20230616.rds")
+obs = y
+# parameter distributions use thinning and remove burn-in period
+thin = 10
+ids = seq(2e4+1, 1e5, by=thin)
+lst <- list()
+lst[[1]] <- smp$chain1[ids,]
+lst[[2]] <- smp$chain2[ids,]
+lst[[3]] <- smp$chain3[ids,]
+lst[[4]] <- smp$chain4[ids,]
+chain = do.call("rbind", lst)
+nrun = 200
+set.seed(42)
+smpl = sample(1:nrow(chain), nrun)
+R0 = t(chain[smpl, 1:11])
+R_int = t(chain[smpl, 14:24])
+day = t(chain[smpl, 26:36])
+
+inclist = vector("list", 11)
+for (i in 1:length(inclist)) {
+  d = data.frame(matrix(NA, nrow=nrow(obs), ncol=nrun))
+  for(j in 1:nrun){
+    d[,j] = nimble_seapird(R0=exp(R0[i,j]), 
+               R_int=exp(R_int[i,j]),
+               pop=df[i,2],
+               inf0=df[i,3],
+               day2=day[i,j])
+  }
+  inclist[[i]] = d
+}
+
+
+library(ggplot2)
+
+# names(obs) = as.character(1:11)
+probs = c(0.025,0.25,0.5,0.75,0.975)
+
+id = 5
+for (id in 1:11) {
+  mod = as.data.frame(t(apply(inclist[[id]], 1, quantile, probs=probs)))
+  mod$date = datnew[datnew$province == "평양",]$date # any province should work
+  obs = as.data.frame(obs)
+  obs$date = mod$date
+  
+  sb <- scales::alpha(c("steelblue"), alpha = c(0.6, 0.55, 1.0)) # symptomatic
+  br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
+  gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+  
+  p <- ggplot(mod, aes(x=date)) +
+    geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`, fill="95% CrI"))+
+    geom_col(data=obs, aes(x=date, y=obs[,id], fill="Data"),
+             inherit.aes = F) +
+    geom_line(aes(y=`50%`, color="50%"), linewidth=1.5) +
+    scale_fill_manual("", values=c("95% CrI"=sb[1], "Data"=br))+
+    scale_color_manual("", values=c("50%"=sb[3]))+
+    labs(x="", y="Daily symptomatic case") +
+    scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+                 limits=c(min(mod$date), max(mod$date)))+
+    theme_bw()+
+    theme(axis.text.x=element_text(angle=60, hjust=1))+
+    theme(legend.position=c(0.8,0.5))+
+    ggtitle(df$province[id])
+  
+  p
+  ggsave(sprintf("plots/mcmc_run_%s_%s.png", df$province[id], tstamp(hour=T)), p, width=3.4*2, height=2.7*2)
+}
+```
+
+##### discrete gamma distribution
+As of 17 June 2023, x ~ ddiscretegamma BUGS code does not produce discrete variables whereas rdiscretegamma does in R session.
+```{r}
+
+ddiscretegamma <- nimbleFunction(
+    run = function(x = integer(0),
+                   shape=double(0),
+                   scale=double(0),
+                   log = integer(0, default = 0)){
+            returnType(double(0))
+            if(x < 0.0)  return (0.0)
+            prob = pgamma(x+1, shape=shape, scale=scale, log=log) - pgamma(x, shape=shape, scale=scale, log=log)
+                
+            return(prob)})
+      
+rdiscretegamma <- nimbleFunction(
+    run = function(n = integer(0),
+                   shape=double(0),
+                   scale=double(0)){
+      returnType(integer(0))
+      if(n != 1) print("rdiscretegamma only allows n = 1; using n = 1.")
+      r = floor(rgamma(1, shape=shape, scale=scale))
+      return(r)})    
+```
+
+#### Partial pooling 
+```{r}
+# constants, data, and initial values
+code_pp2 <- nimbleCode({ # partial pooling
+  R0_mu ~ dnorm(0, sd = 10)
+  R0_sd ~ dexp(0.1)
+  R_int_mu ~ dnorm(0, sd=1)
+  shape ~ dexp(0.1)
+  scale ~ dexp(1)
+  size ~ dexp(1)
+  for (j in 1:R) {
+    R0[j] ~ dnorm(R0_mu, sd = R0_sd)
+    R_int[j] ~ dnorm(R_int_mu, sd = R0_sd)
+    # day[j] ~ ddiscretegamma(shape=shape, scale=scale)
+    day[j] ~ dgamma(shape=shape, scale=scale)
+    mu[1:N, j] <- nimble_seapird(R0=exp(R0[j]), 
+                                 R_int=exp(R_int[j]),
+                                 pop=x[j,1],
+                                 inf0=x[j,2],
+                                 day2=day[j])
+    for (i in 1:N) {
+      # y[i, j] ~ dpois(mu[i, j])
+      # # Posterior predictive analysis
+      # ypred[i,j] ~ dpois(mu[i, j])
+       
+      y[i, j] ~ dnegbin(size/(size + mu[i, j]), size)
+      # Posterior predictive analysis
+      ypred[i,j] ~ dnegbin(size/(size + mu[i, j]), size)
+      
+    }
+  }
+})
+
+const <- list(N=nrow(y), R=ncol(y))
+data <- list(y=y, x=df[,c(2,3)])
+inits <- list(R0_mu=2, R0_sd=1,
+              R0=rep(2, const$R),
+              R_int_mu=0.6,
+              R_int=rep(0.6, const$R),
+              shape=5,
+              scale=1)
+
+## create the model object
+model <- nimbleModel(code = code_pp2,
+                     constants = const,
+                     data = data,
+                     inits = inits, check = FALSE)
+
+Cmodel <- compileNimble(model)
+# mcmc <- buildMCMC(model, monitors=c('R0_mu','R0_sd','R0','R_int_mu','R_int',
+#                                     'mu','shape','scale','day'))
+
+mcmc <- buildMCMC(model, monitors=c('R0_mu','R0_sd','R0','R_int_mu','R_int',
+                                    'shape','scale','day','ypred', "size"))
+
+Cmcmc <- compileNimble(mcmc, project=Cmodel)
+  
+samples <- runMCMC(Cmcmc, niter=5e4, nchains=4)
+saveRDS(samples, paste0("outputs/samples_day_ypred_nb_", tstamp(), ".rds"))
+
+```
+
+Partial pooling 2
+```{r}
+library(nimble)
+devtools::load_all()
+
+code_pp3 <- nimbleCode({ # partial pooling
+  R0_mu ~ dnorm(0, sd = 10)
+  R0_sd ~ dexp(0.1)
+  R_int_mu ~ dnorm(0, sd=1)
+  shape1 ~ dexp(0.1)
+  scale1 ~ dexp(1)
+  shape2 ~ dexp(0.1)
+  scale2 ~ dexp(1)
+  for (j in 1:R) {
+    R0[j] ~ dnorm(R0_mu, sd = R0_sd)
+    R_int[j] ~ dnorm(R_int_mu, sd = R0_sd)
+    day1[j] ~ dgamma(shape = shape1, scale = scale1)
+    day2[j] ~ dgamma(shape = shape2, scale = scale2)
+    mu[1:N, j] <- nimble_seapird(R0 = exp(R0[j]), 
+                                 R_int = exp(R_int[j]),
+                                 pop = x[j,1],
+                                 inf0 = 1.0,
+                                 day1 = day1[j],
+                                 day2 = day2[j])
+    for (i in 1:N) {
+      y[i, j] ~ dpois(mu[i, j])
+      # Posterior predictive analysis
+      ypred[i,j] ~ dpois(mu[i, j])
+    }
+  }
+})
+
+code_pp4 <- nimbleCode({ # partial pooling
+  # R0_mu ~ dnorm(0, sd = 5)
+  # R0_sd ~ dexp(0.1)
+  # R_int_mu ~ dnorm(0, sd = 1)
+  # day1_mu ~ dnorm(0, sd = 5)
+  # day2_mu ~ dnorm(0, sd = 5)
+  # day_sd ~ dexp(0.1)
+  R0_mu ~ dexp(0.1)
+  R0_sd ~ dexp(0.1)
+  R_int_mu ~ dexp(0.1)
+  day1_mu ~ dexp(0.1)
+  day2_mu ~ dexp(0.1)
+  day_sd ~ dexp(0.1)
+  
+  for (j in 1:R) {
+    R0[j] ~ dnorm(R0_mu, sd = R0_sd)
+    R_int[j] ~ dnorm(R_int_mu, sd = R0_sd)
+    day1[j] ~ dnorm(day1_mu, sd = day_sd)
+    day2[j] ~ dnorm(day2_mu, sd = day_sd)
+    mu[1:N, j] <- nimble_seapird(R0 = exp(R0[j]), 
+                                 R_int = exp(R_int[j]),
+                                 pop = x[j,1],
+                                 inf0 = 1.0,
+                                 day1 = exp(day1[j]),
+                                 day2 = exp(day2[j]),
+                                 full_inc = 0)
+    for (i in 1:N) {
+      y[i, j] ~ dpois(mu[i, j])
+      # Posterior predictive analysis
+      ypred[i,j] ~ dpois(mu[i, j])
+    }
+  }
+})
+
+y = nkcovid$incidence
+const <- list(N = nrow(y), R = ncol(y))
+data <- list(y = y, x = nkcovid$pop[,c(2,3)])
+inits <- list(R0_mu = log(6), 
+              R0_sd = 1,
+              R0 = rep(log(6), const$R),
+              R_int_mu = log(0.6),
+              R_int = rep(log(0.6), const$R),
+              day1_mu = log(20),
+              day2_mu = log(2),
+              day_sd = 3)
+# inits <- list(R0_mu = 2, R0_sd = 1,
+#               R0 = rep(2, const$R),
+#               R_int_mu = 0.6,
+#               R_int = rep(0.6, const$R),
+#               shape = 5,
+#               scale = 1)
+
+## create the model object
+model <- nimbleModel(code = code_pp4,
+                     constants = const,
+                     data = data,
+                     inits = inits, check = FALSE)
+
+Cmodel <- compileNimble(model)
+mcmc <- buildMCMC(model, 
+                  monitors=c('R0_mu','R0_sd','R0','R_int_mu',
+                            'R_int','day1', 'day2', 'day1_mu',
+                            'day2_mu','day_sd','ypred'))
+Cmcmc <- compileNimble(mcmc, project = Cmodel)
+  
+samples <- runMCMC(Cmcmc, niter=5e4, nchains=4)
+saveRDS(samples, paste0("outputs/samples_day12_ypred_", tstamp(), ".rds"))
+```
+
+
+#### No pooling 
+```{r}
+library(nimble)
+code_np <- nimbleCode({ # complete pooling
+    R0 ~ dnorm(0, sd = 10)
+    R_int ~ dnorm(0, sd = 1)
+    day ~ dexp(0.1)
+    mu[1:N] <- nimble_seapird(R0=exp(R0), 
+                              R_int=exp(R_int),
+                              pop=pop,
+                              inf0=inf0, 
+                              day2=day)
+    for (i in 1:N) {
+      y[i] ~ dpois(mu[i])
+      # Posterior predictive analysis
+      ypred[i] ~ dpois(mu[i])
+      # y[i] ~ dnegbin(size/(size + mu[i]), size)
+      # # Posterior predictive analysis
+      # ypred[i] ~ dnegbin(size/(size + mu[i]), size)
+    }
+})
+  
+for (i in 1:11) {
+  y = nkcovid$incidence[,i]
+  const <- list(N=length(y))
+  data <- list(y=y, pop=nkcovid$pop$pop[i], inf0=nkcovid$pop$inf0[i])
+  inits <- list(R0=2,
+                R_int=0.6,
+                day=4)
+  
+  ## create the model object
+  model <- nimbleModel(code = code_np,
+                       constants = const,
+                       data = data,
+                       inits = inits, check = FALSE)
+  
+  Cmodel <- compileNimble(model)
+  mcmc <- buildMCMC(model, monitors=c('R0','R_int','day','ypred'))
+  Cmcmc <- compileNimble(mcmc, project=Cmodel)
+  samples <- runMCMC(Cmcmc, niter=5e4, nchains=4)
+  saveRDS(samples, paste0("outputs/samples_day_ypred_nopool_", i,"_", tstamp(), ".rds"))
+}
+
+```
+
+#### Posterior predictive analysis
+
+```{r}
+# convert a matrix to a data.frame to select columns by name
+chain = as.data.frame(samples$chain1)
+ypreds = chain[, grepl("ypred", names(chain))]
+plot(ypreds[,1], type="l") # visual check for convergence
+ypreds = chain[sample(2e4:5e4, 2e3), grepl("ypred", names(chain))]
+
+dim(ypreds)
+probs = c(0.025,0.25,0.5,0.75,0.975)
+summ = apply(ypreds, 2, quantile, probs=probs)
+idall = seq(1, by=74, length.out=11)
+
+for (i in 1:length(idall)) {
+  png(filename = sprintf("fit_%s.png", i))
+  plot(summ[3, idall[i]:(idall[i]+73)], type="l", main=df$province[i])
+  lines(summ[1, idall[i]:(idall[i]+73)], col=3)
+  lines(summ[5, idall[i]:(idall[i]+73)], col=3)
+  points(y[,i], pch="+", col=2)
+  dev.off()
+}
+
+inclist = vector("list", 11)
+for (i in 1:length(inclist)) {
+  d = data.frame(matrix(NA, nrow=nrow(obs), ncol=nrun))
+  for(j in 1:nrun){
+    d[,j] = nimble_seapird(R0=exp(R0[i,j]), 
+               R_int=exp(R_int[i,j]),
+               pop=df[i,2],
+               inf0=df[i,3],
+               day2=day[i,j])
+  }
+  inclist[[i]] = d
+}
+
+
+library(ggplot2)
+
+# names(obs) = as.character(1:11)
+probs = c(0.025,0.25,0.5,0.75,0.975)
+
+id = 5
+for (id in 1:11) {
+  mod = as.data.frame(t(apply(inclist[[id]], 1, quantile, probs=probs)))
+  mod$date = datnew[datnew$province == "평양",]$date # any province should work
+  obs = as.data.frame(obs)
+  obs$date = mod$date
+  
+  sb <- scales::alpha(c("steelblue"), alpha = c(0.6, 0.55, 1.0)) # symptomatic
+  br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
+  gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+  
+  p <- ggplot(mod, aes(x=date)) +
+    geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`, fill="95% CrI"))+
+    geom_col(data=obs, aes(x=date, y=obs[,id], fill="Data"),
+             inherit.aes = F) +
+    geom_line(aes(y=`50%`, color="50%"), linewidth=1.5) +
+    scale_fill_manual("", values=c("95% CrI"=sb[1], "Data"=br))+
+    scale_color_manual("", values=c("50%"=sb[3]))+
+    labs(x="", y="Daily symptomatic case") +
+    scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+                 limits=c(min(mod$date), max(mod$date)))+
+    theme_bw()+
+    theme(axis.text.x=element_text(angle=60, hjust=1))+
+    theme(legend.position=c(0.8,0.5))+
+    ggtitle(df$province[id])
+  
+  p
+  ggsave(sprintf("plots/mcmc_run_%s_%s.png", df$province[id], tstamp(hour=T)), p, width=3.4*2, height=2.7*2)
+}
+```
+
+Partial pooling
+```{r}
+# convert a matrix to a data.frame to select columns by name
+# samples = readRDS("outputs/samples_day_ypred_20230617.rds")
+samples = readRDS("outputs/samples_day12_ypred_20230618.rds")
+
+chain = as.data.frame(samples[[1]])
+ypreds = chain[, grepl("ypred", names(chain))]
+plot(ypreds[,1], type="l") # visual check for convergence
+# 
+thin = 10
+ii = seq(2e4+1, 5e4, by=thin)
+ypreds = chain[ii, grepl("ypred", names(chain))]
+for(i in 2:4) {
+  chain = as.data.frame(samples[[i]])
+  yp = chain[ii, grepl("ypred", names(chain))]
+  ypreds = rbind(ypreds, yp)
+}
+
+# reduce sample size for easier analysis
+nsamp = 1000
+set.seed(42)
+ypreds = ypreds[sample(1:nrow(ypreds), nsamp), ]
+
+dim(ypreds)
+probs = c(0.025,0.25,0.5,0.75,0.975)
+summ = apply(ypreds, 2, quantile, probs=probs)
+id0 = seq(1, by=74, length.out=11)
+
+lst = vector('list', 11)
+for (i in 1:length(lst)) {
+  d = data.frame(date = seq(as.Date("2022-05-14"), as.Date("2022-07-26"), by="day"), 
+                 obs = y[,i],
+               lb = summ[1, id0[i]:(id0[i]+73)], 
+               med = summ[3, id0[i]:(id0[i]+73)],
+               ub = summ[5, id0[i]:(id0[i]+73)],
+               region = nkcovid$pop$province[i])
+  lst[[i]] = d
+}
+dat = do.call("rbind", lst)
+# create data set for multi-facet plot
+
+sb <- scales::alpha(c("steelblue"), alpha = c(0.6, 0.55, 1.0)) # symptomatic
+br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
+gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+
+library(ggplot2)  
+p <- ggplot(dat, aes(x=date)) +
+  geom_ribbon(aes(ymax=ub,ymin=lb, fill="95% PPI"))+
+  geom_line(aes(y=med, color="Median"), linewidth=1) +
+  geom_col(aes(y=obs, fill="Data")) +
+  scale_fill_manual("", values=c("95% PPI"=sb[1], 
+                                 "Data"=br))+
+  scale_color_manual("", values=c("Median"=sb[3]))+
+  labs(x="", y="Daily symptomatic case") +
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d")+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme(legend.position=c(0.85,0.1))+
+  facet_wrap(~region)
+  
+p
+ggsave(sprintf("plots/pois_ppi_nopool_region_day12_%s.png", 
+               tstamp()), p, width=3.4*2, height=2.7*2)
+
+
+```
+
+
+No pooling
+```{r}
+lst2 = vector('list', 11)
+lst = vector('list', 11)
+for (i in 1:11){
+  lst[[i]] = readRDS(paste0("outputs/samples_day_ypred_nopool_", i, "_20230617.rds"))
+}
+
+thin = 10
+chainids = seq(2e4+1, 5e4, by=thin)
+colids = seq(1, by=74, length.out=4)
+for (i in 1:11) {
+  chain = as.data.frame(lst[[i]])
+  # ypreds = chain[, grepl("ypred", names(chain))]
+  # plot(ypreds[,1], type="l") # visual check for convergence
+  # 
+  ypreds = chain[chainids, grepl("ypred", names(chain))]
+  
+  yp = ypreds[, 1:(1+73)]
+  names(yp) = paste0("ypred", 1:74)
+  for (j in 2:4) {
+    yp_ = ypreds[, colids[j]:(colids[j]+73)]
+    names(yp_) = paste0("ypred", 1:74)
+    yp = rbind(yp, yp_)
+  }
+  lst2[[i]] = yp
+}
+ypreds = do.call('cbind', lst2)  
+# reduce sample size for easier analysis
+nsamp = 1000
+set.seed(42)
+ypreds = ypreds[sample(1:nrow(ypreds), nsamp), ]
+
+dim(ypreds)
+probs = c(0.025,0.25,0.5,0.75,0.975)
+summ = apply(ypreds, 2, quantile, probs=probs)
+id0 = seq(1, by=74, length.out=11)
+
+lst = vector('list', 11)
+for (i in 1:length(lst)) {
+  d = data.frame(date = seq(as.Date("2022-05-14"), as.Date("2022-07-26"), by="day"), 
+                 obs = y[,i],
+                 lb = summ[1, id0[i]:(id0[i]+73)], 
+                 med = summ[3, id0[i]:(id0[i]+73)],
+                 ub = summ[5, id0[i]:(id0[i]+73)],
+                 region = nkcovid$pop$province[i])
+  lst[[i]] = d
+}
+dat = do.call("rbind", lst)
+```
+
+
+### Back of an envelope calculation
+```{r}
+# Ct = C0*exp(r*t)
+
+discrete_growth = function(r, delT){
+  C = rep(NA, delT+1)
+  C[1] = 1
+  for (i in 2:(delT+1)) {
+    C[i] = C[i-1]*(1+r)  
+  }
+  return(C)
+}
+continuous_growth = function(r, delT){
+  C = rep(NA, delT+1)
+  C[1] = 1
+  for (i in 2:(delT+1)) {
+    C[i] = C[1]*exp(r*i)  
+  }
+  return(C)
+}
+# growth rate based on the cumumulative incidence
+# this assumes that during the initial period of an epidemic
+# growth rate for the C is similar to the that of I
+C_growth = function(C0, r, t) {
+  C = rep(NA, floor(t+1))
+  C[1] = C0
+  for (i in 2:length(C)) {
+    C[i] = C[1]*exp(r*i)  
+  }
+  return(C)
+}
+
+C_growth2 = function(r, t) {
+  C = rep(NA, floor(t+1))
+  t0 = t - floor(t)
+  C[1] = exp(r*t0) # sub-day growth  
+  for (i in 2:length(C)) {
+    C[i] = C[1] * exp(r*i)  
+  }
+  return(C)
+}
+
+# extract the points where daily incidence keeps increasing
+# d b*S/N - g)
+# R0*(s/N) = r*g+1
+library(COVID19NorthKorea)
+d = DATA$cumul_symptomatic[1:4]
+ssq1 = function(par){
+  exp_r = exp(par)
+  sol = C_growth(d[1], exp_r, length(d)-1)
+  # exp_fl_t0 = floor(exp(par[2]))
+  # sol = continuous_growth(exp_r, exp_fl_t0+4)
+  # sol = con_growth(exp_r, exp_fl_t0+4)
+  # l = length(sol)
+  diff = sol - d
+  return(sum(diff^2))
+}
+fit = optimize(ssq1, interval=c(-10, 10))
+exp(fit$minimum)
+R0_from_r <- function(r, g=1/5, s=1){
+  R0 = (r/g+1)/s
+  return(R0)
+}
+
+R0_from_r(r = exp(fit$minimum))
+
+ssq2 = function(par){
+  exp_r = exp(par[1])
+  exp_t = exp(par[2])
+  sol = C_growth2(exp_r, exp_t)
+  # exp_fl_t0 = floor(exp(par[2]))
+  # sol = continuous_growth(exp_r, exp_fl_t0+4)
+  # sol = con_growth(exp_r, exp_fl_t0+4)
+  l = length(sol)
+  diff = sol[(l-3):l] - d
+  return(sum(diff^2))
+}
+fit = optim(par=c(log(1),log(10)), fn=ssq2)
+
+exp(fit$par)
+R0_from_r(r = exp(fit$par[1]))
+
+## plotting
+t=exp(fit$par[2]) 
+r=exp(fit$par[1])
+C = rep(NA, floor(t+1))
+t0 = t - floor(t)
+C[1] = exp(r*t0) # sub-day growth  
+for (i in 2:length(C)) {
+  C[i] = C[1] * exp(r*i)  
+}
+df = data.frame(model=C, data=NA)
+df$t = 1:nrow(df)
+l = nrow(df)
+df$data[(l-3):l] = DATA$cumul_symptomatic[1:4]
+
+df$data <- as.double(df$data)
+
+p <- ggplot(df, aes(x=t))+
+  geom_line(aes(y=model, color="Model"), linewidth=1)+
+  scale_color_manual("", values=c("Model"="steelblue"))+
+  geom_col(aes(y=data, fill="Data"))+
+  scale_fill_manual("", values=c("Data"="brown"))+
+  labs(x="Day", y="Cumulative cases")+
+  theme_bw()+
+  theme(legend.position = c(0.2, 0.8), 
+        legend.text = element_text(size=12),
+        axis.text = element_text(size=12),
+        text = element_text(size=14))
+
+ggsave("plots/cumul_growth.png", plot=p, width=3.4*2, height=2.7*2)  
+  
+
+
+l = nrow(df)
+df$data[(l-3):l] = DATA$cumul_symptomatic[1:4]
+dflong = tidyr::pivot_longer(df, cols=c("model","data"))
+library(ggplot2)
+ggplot(aes(name, value))+
+  geom
+ssq = function(par){
+  exp_r = exp(par[1])
+  exp_t0 = exp(par[2])
+  sol = con_growth(exp_r, exp_t0+4)
+  # exp_fl_t0 = floor(exp(par[2]))
+  # sol = continuous_growth(exp_r, exp_fl_t0+4)
+  # sol = con_growth(exp_r, exp_fl_t0+4)
+  l = length(sol)
+  diff = sol[(l-3):l] - d
+  return(sum(diff^2))
+}
+
+fit = optim(par=c(log(0.8), log(10)), fn=ssq)
+(par = fit$par)
+(exp_r = exp(par[1]))
+(exp_t0 = exp(par[2]))
+(sol = con_growth(exp_r, exp_t0+4))
+  
+# (exp_fl_t0 = floor(exp(par[2])))
+# sol = continuous_growth(exp_r, exp_fl_t0+4)
+
+l = length(sol)
+round(sol[(l-3):l])
+d
+(sum((sol[(l-3):l]-d)^2))
+
+parm = as.data.frame(expand.grid(r=seq(0.1, 1, by=0.01), t=seq(1,100, 0.1)))
+for (i in 1:nrow(parm)) {
+  parm$sol[i] = ssq(c(log(as.numeric(parm[i, c("r","t")]))))
+}
+parm[which.min(parm$sol),]
+
+explore_parms_2D = function(){
+  lst = list()
+  i = 1
+  for (r in seq(0.1, 1, by=0.1)) {
+    for (t in seq(10, 20, by=1)) {
+      lst[[i]] = ssq(c(log(r),log(t)))
+      i = i+1
+    }
+  }
+  return(lst)
+} 
+
+
+sol = lapply(seq(0.1,1,by=0.1), function(r) lapply(seq(10,20,by=1), function(x) ssq(c(log(r),log(x)))))
+
+sol = do.call('c', explore_parms_2D())
+sol
 ```
 
