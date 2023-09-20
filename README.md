@@ -254,7 +254,7 @@ p
 ![](README_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 ``` r
-# Grey color indicates the area of no information 
+# Grey color indicates the areas of no information 
 ```
 
 ### 사망자수 및 치명률 (case fatality ratio)
