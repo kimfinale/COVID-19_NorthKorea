@@ -10,26 +10,30 @@
 # install.packages("ggplot2")
 # install.packages("dplyr")
 # install.packages("data.table")
+# install.packages("Rcpp")
 library(nimble)
 library(rio)
 library(ggplot2)
 library(dplyr)
 library(data.table)
+library(Rcpp)
 ```
 
 R 폴더에 다양함 함수 (function, method, or subroutine)가 있어 그
-파일들을 먼저 `source` 함수를 이용해 실행한다.
+파일들을 먼저 `source` 함수를 이용해 실행한다. C++ 언어로 구현된 모형
+(`src/models.cpp`) 도 실행한다.
 
 ``` r
 files <- list.files("R/", ".R$", full.names=TRUE)
 sapply(files, source)
+sourceCpp("src/models.cpp")
 ```
 
-들어가기 우리가 분석에 북한 코로나19 자료는 **조선중앙TV** 와
-**로동신문** 의 일별 유열자수에 기반한다. 조선중앙TV는 지역별로 일별
-유열자수를 보여주는 데 반해 로동신문 자료는 그렇지 않다. 반편
-조선중앙TV는 결측자료가 많아 조선중앙TV의 지역별 일별 환자수를 모두
-합해도 로동신문 자료의 일별 유열자수에 비해 적다.
+우리가 분석에 북한 코로나19 자료는 **조선중앙TV**와 **로동신문**의 일별
+유열자수에 기반한다. 조선중앙TV는 지역별로 일별 유열자수를 보여주는 데
+반해 로동신문 자료는 그렇지 않다. 반편 조선중앙TV는 결측자료가 많아
+조선중앙TV의 지역별 일별 환자수를 모두 합해도 로동신문 자료의 일별
+유열자수 보다 적다.
 
 ### 지역별 코로나19 유행 곡선
 
