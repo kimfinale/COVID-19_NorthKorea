@@ -11,12 +11,13 @@
 # install.packages("dplyr")
 # install.packages("data.table")
 # install.packages("Rcpp")
-library(nimble)
-library(rio)
-library(ggplot2)
-library(dplyr)
-library(data.table)
-library(Rcpp)
+library(nimble) # Bayesian MCMC related in some files in the R folder although which is not required for this particular study  
+library(rio) # data import from Excel
+library(ggplot2) # plotting
+library(dplyr) # data wranggling
+library(data.table) # data wranggling
+library(Rcpp) # model implemented in C++
+library(sf) # mapping
 ```
 
 R 폴더에 다양함 함수 (function, method, or subroutine)가 있어 그
@@ -26,6 +27,31 @@ R 폴더에 다양함 함수 (function, method, or subroutine)가 있어 그
 ``` r
 files <- list.files("R/", ".R$", full.names=TRUE)
 sapply(files, source)
+```
+
+    ##         R/doubling_time.R R/draw_params.R R/exp_growth_step.R R/extract_dates.R
+    ## value   ?                 ?               ?                   ?                
+    ## visible FALSE             FALSE           FALSE               FALSE            
+    ##         R/find_best.R R/find_min_DE.R R/grid_search.R R/incidence.R
+    ## value   ?             ?               ?               ?            
+    ## visible FALSE         FALSE           FALSE           FALSE        
+    ##         R/initialize_params.R R/map_functions.R R/mcmc.R R/negloglik.R
+    ## value   ?                     ?                 ?        ?            
+    ## visible FALSE                 FALSE             FALSE    FALSE        
+    ##         R/nimble_seapird.R R/nimble_seapird2.R R/nimble_seapird2_stoch.R
+    ## value   ?                  ?                   ?                        
+    ## visible FALSE              FALSE               FALSE                    
+    ##         R/parametric_boot.R R/plot_annotate.R R/plot_model_data.R
+    ## value   numeric,2           ?                 ?                  
+    ## visible FALSE               FALSE             FALSE              
+    ##         R/RcppExports.R R/run_model.R R/summarize_model_output.R
+    ## value   ?               ?             ?                         
+    ## visible FALSE           FALSE         FALSE                     
+    ##         R/update_params.R R/utils.R
+    ## value   ?                 ?        
+    ## visible FALSE             FALSE
+
+``` r
 sourceCpp("src/models.cpp")
 ```
 
@@ -59,13 +85,15 @@ df <- do.call("rbind", caselist)
 지역별 유행곡선 플롯하기
 
 ``` r
-p<-ggplot(df, aes(date, case))+
+p <- ggplot(df, aes(date, case))+
   geom_col(fill="brown", alpha=0.5)+
   theme_bw() +
   labs(x="", y="Symptomatic case") +
   facet_wrap(~province, scales = "free_y",)
 p
 ```
+
+![](README_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 
 시기별 (월별), 지역별 기술 분석을 위해 자료 변형
 
@@ -111,8 +139,19 @@ df_prov$attack_rate = 100 * df_prov$inf / df_prov$Total
 지역별 발병율 지도에 표기하기
 
 ``` r
-library(sf)
 dprk <- st_read("inst/extdata/gadm41_PRK_shp/gadm41_PRK_1.shp")
+```
+
+    ## Reading layer `gadm41_PRK_1' from data source 
+    ##   `G:\My Drive\Projects\COVID19NorthKorea\inst\extdata\gadm41_PRK_shp\gadm41_PRK_1.shp' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 14 features and 11 fields
+    ## Geometry type: MULTIPOLYGON
+    ## Dimension:     XY
+    ## Bounding box:  xmin: 124.1824 ymin: 37.67598 xmax: 130.6744 ymax: 43.00605
+    ## Geodetic CRS:  WGS 84
+
+``` r
 dprk$name_kor = c("자강","함북","함남","황북","황남","개성","강원","강원","평북","평남","평양","나선","양강","평북")
 dprk$AR = NA
 
@@ -126,16 +165,17 @@ dprk[dprk$name_kor  == "나선",]$AR =
   df_prov[df_prov$province == "함북",]$attack_rate
 
 library(RColorBrewer)
-plt <- ggplot(dprk) +
+p <- ggplot(dprk) +
   geom_sf(aes(fill=AR)) +
   scale_fill_gradientn(colors=brewer.pal(9, "YlOrBr"), name="Attack rate (%)")+
   coord_sf()+
   theme_map(legend_position = c(0.96, 0.3)) +
   theme(legend.title = element_text(size=12),
         legend.text = element_text(size=12))
-
-plt
+p
 ```
+
+![](README_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
 
 ### 지역별 인구밀도
 
@@ -171,6 +211,50 @@ area_2 <- data.frame(province_eng = paste0(area_df$province_eng[2], "_", area_df
 area_2$area_sqkm <- area_df$area_sqkm[2] + area_df$area_sqkm[12]
 area_2$pop <- area_df$pop[2]
 area_2$pop_den <- area_2$pop/ area_2$area_sqkm
+
+area_df$pop_den[4] <- area_1$pop_den
+area_df$pop_den[6] <- area_1$pop_den
+area_df$pop_den[2] <- area_2$pop_den
+area_df$pop_den[12] <- area_2$pop_den
+```
+
+지역별 인구밀도 지도로 나타내기
+
+``` r
+dprk <- st_read("inst/extdata/gadm41_PRK_shp/gadm41_PRK_1.shp")
+```
+
+    ## Reading layer `gadm41_PRK_1' from data source 
+    ##   `G:\My Drive\Projects\COVID19NorthKorea\inst\extdata\gadm41_PRK_shp\gadm41_PRK_1.shp' 
+    ##   using driver `ESRI Shapefile'
+    ## Simple feature collection with 14 features and 11 fields
+    ## Geometry type: MULTIPOLYGON
+    ## Dimension:     XY
+    ## Bounding box:  xmin: 124.1824 ymin: 37.67598 xmax: 130.6744 ymax: 43.00605
+    ## Geodetic CRS:  WGS 84
+
+``` r
+dprk$pop_density = NA
+# area_df computed in the previous code block
+for (n in dprk$NAME_1){
+  dprk[dprk$NAME_1 == n,]$pop_density = area_df[area_df$province_eng  == n,]$pop_den
+}
+
+library(RColorBrewer)
+p <- ggplot(dprk) +
+  geom_sf(aes(fill=pop_density)) +
+  scale_fill_gradientn(colors=brewer.pal(9, "YlOrBr"), name="Population density \n(per sq. km)")+
+  coord_sf()+
+  theme_map(legend_position = c(0.96, 0.3)) +
+  theme(legend.title = element_text(size=12),
+        legend.text = element_text(size=12))
+p
+```
+
+![](README_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+
+``` r
+# Grey color indicates the area of no information 
 ```
 
 ### 사망자수 및 치명률 (case fatality ratio)
@@ -223,8 +307,19 @@ p <- grid.arrange(
   nrow=1, 
   widths = c(1,2),
   bottom = "Expected death")
+```
+
+![](README_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+
+``` r
 p
 ```
+
+    ## TableGrob (2 x 2) "arrange": 3 grobs
+    ##   z     cells    name                grob
+    ## 1 1 (1-1,1-1) arrange      gtable[layout]
+    ## 2 2 (1-1,2-2) arrange      gtable[layout]
+    ## 3 3 (2-2,1-2) arrange text[GRID.text.742]
 
 ### 중환자수
 
@@ -252,9 +347,10 @@ p <- ggplot(df) +
   scale_y_continuous()+
   labs(x="", y="Probability")+
   theme_bw()
-
 p
 ```
+
+![](README_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
 
 ### 무증상수를 감안한 예상 감염자수 및 롱코비드 예상 환자
 
@@ -268,23 +364,57 @@ deaths <- tail(d$cumul_deaths, 1) # deaths
 infecteds = tail(d$cumul_recovered,1) + tail(d$cumul_deaths, 1) # total cases
 parm <- initialize_params()
 parm$fA # proportion of 
+```
+
+    ## [1] 0.255
+
+``` r
 expected_inf = infecteds/(1-parm$fA)
 expected_inf / parm$population
 ```
 
-예상 롱코비드 환자수 각
+    ## [1] 0.246687
+
+예상 롱코비드 환자수 계산
 
 ``` r
 #4,904,963   19.1   0-14
 # 43~87% Long COVID
 infecteds * 0.43
+```
+
+    ## [1] 2052310
+
+``` r
 infecteds * 0.87
+```
+
+    ## [1] 4152347
+
+``` r
 # Long COVID 0-14 yo
 infecteds * 0.15 * 0.19 
+```
+
+    ## [1] 136025.2
+
+``` r
 infecteds * 0.25 * 0.19
+```
+
+    ## [1] 226708.6
+
+``` r
 infecteds * 0.04 * 0.19 
+```
+
+    ## [1] 36273.38
+
+``` r
 infecteds * 0.582 * 0.19
 ```
+
+    ## [1] 527777.7
 
 ### 수리모형
 
@@ -322,12 +452,14 @@ p <- ggplot(mod1, aes(x=date)) +
 p
 ```
 
+![](README_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
+
 ### 확률론적 모형
 
 ``` r
 set.seed(42)
 d = readRDS("inst/extdata/covid_overall_20230122.rds")
-case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+# case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
 obs <- d$symptomatic
 # PARAMETERS is a global variable used in other functions (eg, update_params, 
 # incidence,)
@@ -351,14 +483,15 @@ for (i in 2:nrun) {
   m[,i] = y[,1]  
 }
 # plot only those with at least two cases
-min_case = 10000
-ids <- colSums(m) > min_case
-m <- m[,ids] # select only those at least one infection has been generated
+# min_case = 10000
+# ids <- colSums(m) > min_case
+# m <- m[,ids] # select only those at least one infection has been generated
 sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.025,0.5,0.975))))
-colSums(sim)
+# sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.25,0.5,0.75))))
+# colSums(sim)
 ## the first day represents the cumulative cases occurred before the first reporting 
-dat1 = data.frame(date=seq(from=DATA$date[1], by="1 day",
-                           length.out=length(OBS)), obs=OBS)
+dat1 = data.frame(date=seq(from=d$date[1], by="1 day",
+                           length.out=length(obs)), obs=obs)
 mod1 = data.frame(date=rev(seq(from=tail(dat1$date,1)-1, by="-1 day",
                                length.out=nrow(m))))
 mod1 <- cbind(mod1, sim)
@@ -383,3 +516,5 @@ p <- ggplot(mod1, aes(x=date)) +
   theme(legend.position=c(0.8,0.5))
 p
 ```
+
+![](README_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
