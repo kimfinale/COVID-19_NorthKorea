@@ -159,11 +159,12 @@ for (i in 1:length(prov)) {
 library(dplyr)
 
 df <- data.frame(matrix(NA, nrow=length(unique(datnew$province)), 
-                             ncol=3))
-names(df) <- c("province", "pop", "inf0")
+                             ncol=4))
+names(df) <- c("province", "pop", "inf0", "province_English")
 df$province <- prov
 for (i in 1:nrow(df)) {
   df$pop[i] <- pop[pop$province == df$province[i],]$Total
+  df$province_English[i] <- pop[pop$province == df$province[i],]$province_English
   d <- datnew[datnew$province == df$province[i], ]
   df$inf0[i] <- d$`치료중 환자수`[1] + d$`당일 완쾌자수`[1] + d$`당일 사망자 수`[1] - d$`당일 발생자수`[1]
 }
