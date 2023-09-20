@@ -27,31 +27,6 @@ R 폴더에 다양함 함수 (function, method, or subroutine)가 있어 그
 ``` r
 files <- list.files("R/", ".R$", full.names=TRUE)
 sapply(files, source)
-```
-
-    ##         R/doubling_time.R R/draw_params.R R/exp_growth_step.R R/extract_dates.R
-    ## value   ?                 ?               ?                   ?                
-    ## visible FALSE             FALSE           FALSE               FALSE            
-    ##         R/find_best.R R/find_min_DE.R R/grid_search.R R/incidence.R
-    ## value   ?             ?               ?               ?            
-    ## visible FALSE         FALSE           FALSE           FALSE        
-    ##         R/initialize_params.R R/map_functions.R R/mcmc.R R/negloglik.R
-    ## value   ?                     ?                 ?        ?            
-    ## visible FALSE                 FALSE             FALSE    FALSE        
-    ##         R/nimble_seapird.R R/nimble_seapird2.R R/nimble_seapird2_stoch.R
-    ## value   ?                  ?                   ?                        
-    ## visible FALSE              FALSE               FALSE                    
-    ##         R/parametric_boot.R R/plot_annotate.R R/plot_model_data.R
-    ## value   numeric,2           ?                 ?                  
-    ## visible FALSE               FALSE             FALSE              
-    ##         R/RcppExports.R R/run_model.R R/summarize_model_output.R
-    ## value   ?               ?             ?                         
-    ## visible FALSE           FALSE         FALSE                     
-    ##         R/update_params.R R/utils.R
-    ## value   ?                 ?        
-    ## visible FALSE             FALSE
-
-``` r
 sourceCpp("src/models.cpp")
 ```
 
