@@ -12,7 +12,8 @@
 #'
 #' @examples
 #'
-incidence <- function(pars, model=NULL, unit_time=1, state="cumul_symptomatic"){
+incidence <- function(pars, model=NULL, unit_time=1,
+                      state="cumul_symptomatic"){
 
   params = update_params(pars=pars)
 

@@ -309,3 +309,42 @@ polygon_plot <- function(polygon = NULL,
 
   return (p)
 }
+
+
+admin1_dprk_to_eng <- function(vec){
+  newvec <- rep(NA, length(vec))
+  for (i in 1:length(vec)){
+    x <- vec[i]
+    if(x %in% c("Jagang", "Jagang-do", "자강")){
+      newvec[i] <- "Chagang-do"
+    } else if(x %in% c("North Hamgyong", "함북", "함경북도")){
+      newvec[i] <- "Hamgyŏng-bukto"
+    } else if(x %in% c("South Hamgyong", "함남", "함경남도")){
+      newvec[i] <- "Hamgyŏng-namdo"
+    } else if(x %in% c("North Hwanghae", "황북", "황해북도")){
+      newvec[i] <- "Hwanghae-bukto"
+    } else if(x %in% c("South Hwanghae", "황남", "황해남도")){
+      newvec[i] <- "Hwanghae-namdo"
+    } else if(x %in% c("Kaesong", "개성")){
+      newvec[i] <- "Kaesŏng"
+    } else if(x %in% c("Kangwon", "강원")){
+      newvec[i] <- "Kangwŏn-do"
+    } else if(x %in% c("금강산")){
+      newvec[i] <- "Kumgangsan"
+    } else if(x %in% c("North Pyongan", "평안북도", "평북")){
+      newvec[i] <- "P'yŏngan-bukto"
+    } else if(x %in% c("South Pyongan", "평안남도", "평남")){
+      newvec[i] <- "P'yŏngan-namdo"
+    } else if(x %in% c("Pyongyang", "평양")){
+      newvec[i] <- "P'yŏngyang"
+    } else if(x %in% c("Rason", "라선", "나선")){
+      newvec[i] <- "Rasŏn"
+    } else if(x %in% c("Ryanggang", "양강")){
+      newvec[i] <- "Ryanggang"
+    } else if(x %in% c("Sinuiju", "신의주")){
+      newvec[i] <- "Sinŭiju"
+    } else{ newvec[i] <- x}
+  }
+  return(newvec)
+}
+

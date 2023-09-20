@@ -31,7 +31,7 @@ initialize_params <- function(...) {
   # Strasser (2022) JAMA Network Open doi:10.1001/jamanetworkopen.2022.38354
   params$eta <- 1 / 14 # 1 / mean delay from symptom onset to death
 
-  params$fA <- 0.255 # fraction of asymptomatic state Yu (2022) JMW doi:10.1002/jmv.28066
+  params$fA <- 0.255 # fraction of asymptomatic state Yu (2022) JMV doi:10.1002/jmv.28066
   params$bP <- 1 # relative infectiousness of pre-symptomatic state
   params$bA <- 1 # relative infectiousness of asymptomatic state
   params$cfr <- 0.0304 # case fatality ratio Wang(2023) JMV doi:10.1002/jmv.28118

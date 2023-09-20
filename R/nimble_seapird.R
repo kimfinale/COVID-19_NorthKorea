@@ -5,7 +5,8 @@ nimble_seapird <- nimbleFunction(
                  inf0=double(0, default=1.0),
                  day1=double(0, default=0),
                  day2=double(0),
-                 full_inc=integer(0,default=0)) {
+                 full_inc=integer(0,default=0),
+                 nobs=integer(0, default=80L)) {
 
   Day1 = day1 # introduction happened "Day1" days before May 12 (reported)
   Day2 = day2 # intervention "Day2" days after May 12
@@ -17,14 +18,15 @@ nimble_seapird <- nimbleFunction(
   bP = 1     # relative infectiousness of pre-symptomatic state
   bA = 1     # relative infectiousness of asymptomatic state
   cfr = 0.0304 # case fatality ratio Wang(2023) JMV doi:10.1002/jmv.28118
-  obs_length = 74                  # May 14 - July 26
+  # obs_length = 74                  # May 14 - July 26
+  obs_length = nobs
   R0 = R0 # basic reproduction number
   R_int = R_int # R0 when intervention is in place
   rate_P_I = 1 / (1/delta - 1/epsilon) # transition rate from P to I
   # // 'dur_infect' is a temporary variable reflecting the fraction (fA) of going
   # // to A rather than P (which becomes I), the duration of P, A, and I
   # // stages, and the infectivity of P (ie, bP) and A (ie, bA) relative to I.
-  dur_infect = fA * bA * (1/rate_P_I + 1/gamma) + (1 - fA) * (bP/rate_P_I + 1/gamma)
+  dur_infect = fA * bA * (1/rate_P_I + 1/gamma) + (1-fA) * (bP/rate_P_I + 1/gamma)
   beta = R0 / dur_infect # // 'dur_infect' multiplied by beta gives R0
   ndays = floor(Day1) + obs_length + 1
   # day of intervention is counted by days from introduction
@@ -147,10 +149,13 @@ nimble_seapird <- nimbleFunction(
 
 
   inc = CI[(2+floor(day1)):ndays] - CI[(1+floor(day1)):(ndays-1)]
+  # inc0 = CI[1+floor(day1)]
 
   if (full_inc > 1e-6) {
     inc = CI[2:ndays] - CI[1:(ndays-1)]
   }
+  # inc = CI[2:ndays] - CI[1:(ndays-1)]
+  # return(c(inc0, inc))
   return(inc)
   returnType(double(1))
 }
