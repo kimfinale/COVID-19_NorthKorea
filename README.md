@@ -1113,7 +1113,6 @@ df_selected_NKperiod <- df_countries_NKperiod[df_countries_NKperiod$location %in
                                                 c("North Korea", "South Korea", 
                                                   "Russia", "China", "Mongolia"), ]
 
-# [그림] 주변 국가와의 비교 (2022)
 ggplot(data = df_countries_NKperiod, aes(x = "", y = `2022_new_cases_per_million`)) +
   geom_boxplot() +
   geom_point(data = df_selected_NKperiod, aes(x = "", y = `2022_new_cases_per_million`, fill = location), color = "white", shape = 21, size = 1.5) +
@@ -1130,3 +1129,26 @@ ggplot(data = df_countries_NKperiod, aes(x = "", y = `2022_new_cases_per_million
 ```
 
 ![](README_files/figure-gfm/unnamed-chunk-28-1.png)<!-- -->
+
+``` r
+df_sorted <- df_countries_NKperiod[order(df_countries_NKperiod$`2022_new_cases_per_million`, decreasing=TRUE),]
+head(df_sorted)
+```
+
+    ## # A tibble: 6 × 5
+    ##   iso_code continent     location  2022_new_cases_per_m…¹ 2022_new_deaths_per_…²
+    ##   <chr>    <chr>         <chr>                      <dbl>                  <dbl>
+    ## 1 FLK      South America Falkland…                382794.                    0  
+    ## 2 NRU      Oceania       Nauru                    362383.                   78.8
+    ## 3 PRK      Asia          North Ko…                172799.                    0  
+    ## 4 BRN      Asia          Brunei                   166242.                   60.1
+    ## 5 MTQ      North America Martiniq…                160289.                  237. 
+    ## 6 MSR      North America Montserr…                141627.                 1360. 
+    ## # ℹ abbreviated names: ¹​`2022_new_cases_per_million`,
+    ## #   ²​`2022_new_deaths_per_million`
+
+``` r
+# Only two areas have higher COVID-19 incidence per 1,000,000 people: 
+# Falkland Islands and Nauru. These two islands have the population sizes of 
+# 3,662 (2021 census) and 10,084 (2021 census), respectively.
+```
