@@ -15,6 +15,17 @@
 incidence <- function(pars, model=NULL, unit_time=1,
                       state="cumul_symptomatic"){
 
+  # state variable
+  # S(0) = params["susceptible"];       // susceptible
+  # E(0) = params["exposed"];           // exposed
+  # A(0) = params["asymptomatic"];      // asymptomatic
+  # P(0) = params["presymptomatic"];    // pre-symptomatic
+  # I(0) = params["symptomatic"];       // symptomatic
+  # R(0) = params["recovered"];         // recovered
+  # D(0) = params["dead"];              // deaths
+  # CE(0) = params["cumul_infected"];    // cumulative infection
+  # CI(0) = params["cumul_symptomatic"]; // cumulative symptomatic
+
   params = update_params(pars=pars)
 
   if(!is.null(model)) {

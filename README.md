@@ -757,10 +757,11 @@ cat(paste0(round(cases_kids * 0.044), ", ", round(cases_kids * 0.582)), "\n")
 
 ### 수리모형
 
+일별 유열자
+
 ``` r
 # cleaned dataset 
 d = readRDS("inst/extdata/covid_overall_20230122.rds")
-
 obs <- c(d$symptomatic)
 # PARAMETERS is a global variable that is used in update_params, incidence, etc.
 PARAMETERS <- initialize_params(tau=0.1, obs_length=length(obs))
@@ -774,7 +775,6 @@ mod1 = data.frame(date=rev(seq(from=tail(dat1$date,1)-1, by="-1 day",
                                length.out=nrow(y))), 
                   val = y[,1])
 
-library(ggplot2)
 sb <- scales::alpha(c("steelblue"), alpha = c(0.6, 0.55, 1.0)) # symptomatic
 br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
 gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
@@ -793,7 +793,48 @@ p
 
 ![](README_files/figure-gfm/unnamed-chunk-21-1.png)<!-- -->
 
+일별 유열자 및 감염자
+
+``` r
+# cleaned dataset 
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+obs <- c(d$symptomatic)
+# PARAMETERS is a global variable that is used in update_params, incidence, etc.
+PARAMETERS <- initialize_params(tau=0.1, obs_length=length(obs))
+fit = readRDS("outputs/fit_20230527.rds")
+parm = fit$optim$bestmem
+set.seed(1)
+y <- incidence(pars=parm, state=c("cumul_infected", "cumul_symptomatic"))
+dat1 = data.frame(date=seq(from=d$date[1], by="1 day",
+                           length.out=length(obs)), obs=obs)
+mod1 = data.frame(date=rev(seq(from=tail(dat1$date,1)-1, by="-1 day",
+                               length.out=nrow(y))), 
+                  cumul_infected = y[,1],
+                  cumul_symptomatic = y[,2])
+
+sb <- scales::alpha(c("steelblue"), alpha = c(0.6, 0.55, 1.0)) # symptomatic
+br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
+gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+
+p <- ggplot(mod1, aes(x=date)) +
+  geom_col(data=dat1, aes(x=date, y=obs), fill=br[1], inherit.aes=F) +
+  geom_line(aes(y=cumul_infected, color="Infected"), linewidth=1)+
+  geom_line(aes(y=cumul_symptomatic, color="Symptomatic"), linewidth=1)+
+  scale_color_manual("", values=c("Infected"=gr[3], "Symptomatic"=sb[3]))+
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+               limits=c(min(mod1$date), max(dat1$date)))+
+  theme_bw()+
+  labs(x="", y="Daily case") +
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme(legend.position=c(0.8,0.5))
+p
+```
+
+![](README_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
+
 ### 확률론적 모형
+
+유열자
 
 ``` r
 set.seed(42)
@@ -825,7 +866,9 @@ for (i in 2:nrun) {
 # min_case = 10000
 # ids <- colSums(m) > min_case
 # m <- m[,ids] # select only those at least one infection has been generated
-sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.025,0.5,0.975))))
+# sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.025,0.5,0.975))))
+probs = c(0.05,0.5,0.95)
+sim = as.data.frame(t(apply(m, 1, quantile, probs=probs)))
 # sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.25,0.5,0.75))))
 # colSums(sim)
 ## the first day represents the cumulative cases occurred before the first reporting 
@@ -834,17 +877,18 @@ dat1 = data.frame(date=seq(from=d$date[1], by="1 day",
 mod1 = data.frame(date=rev(seq(from=tail(dat1$date,1)-1, by="-1 day",
                                length.out=nrow(m))))
 mod1 <- cbind(mod1, sim)
+names(mod1) <- c("date","lower","med","upper")
 # mx = max(c(dat1$obs, mod1$`97.5%`), na.rm=T)
-library(ggplot2)
+
 sb <- scales::alpha(c("steelblue"), alpha = c(0.6, 0.55, 1.0)) # symptomatic
 br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
 gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
 
 p <- ggplot(mod1, aes(x=date)) +
-  geom_ribbon(aes(ymax=`97.5%`,ymin=`2.5%`, fill="95% CrI"))+
+  geom_ribbon(aes(ymax=upper,ymin=lower, fill="95% CrI"))+
   geom_col(data=dat1, aes(x=date, y=obs, fill="Data"),
            inherit.aes = F) +
-  geom_line(aes(y=`50%`, color="50%"), linewidth=1.5) +
+  geom_line(aes(y=med, color="50%"), linewidth=1.5) +
   scale_fill_manual("", values=c("95% CrI"=sb[1], "Data"=br))+
   scale_color_manual("", values=c("50%"=sb[3]))+
   labs(x="", y="Daily symptomatic case") +
@@ -856,7 +900,81 @@ p <- ggplot(mod1, aes(x=date)) +
 p
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-23-1.png)<!-- -->
+
+유열자 및 감염자
+
+``` r
+set.seed(42)
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+# case_before <- d$cumul_recovered[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+obs <- d$symptomatic
+# PARAMETERS is a global variable used in other functions (eg, update_params, 
+# incidence,)
+PARAMETERS <- initialize_params(tau=0.1, obs_length=length(obs))
+# Day 1 and Day 2 are integers
+fit = readRDS("outputs/fit_20230527.rds")
+parm = fit$optim$bestmem
+
+# stochastic model
+PARAMETERS$model <- seapird_tauleap
+# PARAMETERS$symptomatic <- 2
+
+nrun = 1000
+set.seed(1)
+y <- incidence(pars=parm, state=c("cumul_infected", "cumul_symptomatic"))
+m2 <- m1 <- matrix(NA, nrow=nrow(y), ncol=nrun)
+m1[,1] = y[,1]
+m2[,1] = y[,2]
+for (i in 2:nrun) {
+  set.seed(i)
+  y <- incidence(pars=parm, state=c("cumul_infected", "cumul_symptomatic"))
+  m1[,i] = y[,1]
+  m2[,i] = y[,2]
+}
+# plot only those with at least two cases
+# min_case = 10000
+# ids <- colSums(m) > min_case
+# m <- m[,ids] # select only those at least one infection has been generated
+probs = c(0.05,0.5,0.95)
+sim1 = as.data.frame(t(apply(m1, 1, quantile, probs=probs)))
+sim2 = as.data.frame(t(apply(m2, 1, quantile, probs=probs)))
+# sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.25,0.5,0.75))))
+# colSums(sim)
+## the first day represents the cumulative cases occurred before the first reporting 
+dat = data.frame(date=seq(from=d$date[1], by="1 day",
+                           length.out=length(obs)), obs=obs)
+mod = data.frame(date=rev(seq(from=tail(dat$date,1)-1, by="-1 day",
+                               length.out=nrow(m))))
+mod <- cbind(mod, sim1, sim2)
+names(mod) <- c("date","lower","med","upper","lower_symp","med_symp","upper_symp")
+# mx = max(c(dat1$obs, mod1$`97.5%`), na.rm=T)
+
+sb <- scales::alpha(c("steelblue"), alpha = c(0.5, 0.55, 1.0)) # symptomatic
+br <- scales::alpha(c("brown"), alpha = c(0.5)) # data
+gr <- scales::alpha(c("darkgreen"), alpha = c(0.5, 0.55, 0.9)) # infection
+
+p <- ggplot(mod, aes(x=date)) +
+  geom_ribbon(aes(ymax=upper, ymin=lower, fill="Infected (95% CrI)"))+
+  geom_ribbon(aes(ymax=upper_symp, ymin=lower_symp, fill="Symptomatic (95% CrI)"))+
+  geom_col(data=dat, aes(x=date, y=obs, fill="Data"),
+           inherit.aes = F) +
+  geom_line(aes(y=med, color="Infected (50%)"), linewidth=1.5) +
+  geom_line(aes(y=med_symp, color="Symptomatic (50%)"), linewidth=1.5) +
+  scale_fill_manual("", values=c("Symptomatic (95% CrI)"=sb[1],
+                                 "Infected (95% CrI)"=gr[1],
+                                 "Data"=br))+
+  scale_color_manual("", values=c("Infected (50%)"=gr[3], "Symptomatic (50%)"=sb[3]))+
+  labs(x="", y="Daily symptomatic case") +
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
+               limits=c(min(mod$date), max(dat$date)))+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle=60, hjust=1))+
+  theme(legend.position=c(0.8,0.5))
+p
+```
+
+![](README_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
 
 ### COVID-19관련 세계 및 북한 데이터를 시각화
 
@@ -1046,7 +1164,7 @@ ggplot(data = df_countries, aes(x = "", y = `2022_new_cases_per_million`)) +
        x = "전세계")
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
 
 대륙별
 
@@ -1060,7 +1178,7 @@ ggplot(data = df_countries, aes(x = continent, y = `2022_new_cases_per_million`)
        x = "")
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-26-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-28-1.png)<!-- -->
 
 지리적으로 북한과 가깝고 체저가 유사한 나라를 골라서 북한과 비교
 
@@ -1088,7 +1206,7 @@ ggplot(data = df_countries, aes(x = "", y = `2022_new_cases_per_million`)) +
        x = "")
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->
 
 북한 자료가 있는 5-7월 기간 동안 백만 명당 신규 사례에 대한 박스 플롯
 생성
@@ -1113,7 +1231,7 @@ ggplot(data = df_countries_NKperiod, aes(x = "", y = `2022_new_cases_per_million
        x = "")
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-28-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-30-1.png)<!-- -->
 
 ``` r
 df_sorted <- df_countries_NKperiod[order(df_countries_NKperiod$`2022_new_cases_per_million`, decreasing=TRUE),]
