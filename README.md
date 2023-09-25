@@ -715,15 +715,16 @@ p
 ``` r
 d <- readRDS("inst/extdata/covid_overall_20230122.rds")
 deaths <- tail(d$cumul_deaths, 1) # deaths
-infecteds = tail(d$cumul_recovered,1) + tail(d$cumul_deaths, 1) # total cases
+cases = tail(d$cumul_recovered,1) + tail(d$cumul_deaths, 1) # total cases
 parm <- initialize_params()
-parm$fA # proportion of 
+# proportion of asymptomatic infections
+parm$fA 
 ```
 
     ## [1] 0.255
 
 ``` r
-expected_inf = infecteds/(1-parm$fA)
+expected_inf = cases/(1-parm$fA)
 expected_inf / parm$population
 ```
 
@@ -732,43 +733,27 @@ expected_inf / parm$population
 예상 롱코비드 환자수 계산
 
 ``` r
-#4,904,963   19.1   0-14
-# 43~87% Long COVID
-infecteds * 0.43
+# 코로나 환자의 43~87% Long COVID 경험
+cat(paste0(round(cases * 0.430), ", ", round(cases * 0.870)), "\n")
 ```
 
-    ## [1] 2052310
+    ## 2052310, 4152347
 
 ``` r
-infecteds * 0.87
+# Long COVID for 0-14 yo
+cases_kids <- cases * 0.191
+# 기존 문헌에서 제시한 코로나 총환자 대비 소아청소년 만성코로나19 증후군 환자의 비율을(15%~25%) 적용
+cat(paste0(round(cases_kids * 0.150), ", ", round(cases_kids * 0.250)), "\n")
 ```
 
-    ## [1] 4152347
+    ## 136741, 227902
 
 ``` r
-# Long COVID 0-14 yo
-infecteds * 0.15 * 0.19 
+# <표 3-10>
+cat(paste0(round(cases_kids * 0.044), ", ", round(cases_kids * 0.582)), "\n") 
 ```
 
-    ## [1] 136025.2
-
-``` r
-infecteds * 0.25 * 0.19
-```
-
-    ## [1] 226708.6
-
-``` r
-infecteds * 0.04 * 0.19 
-```
-
-    ## [1] 36273.38
-
-``` r
-infecteds * 0.582 * 0.19
-```
-
-    ## [1] 527777.7
+    ## 40111, 530555
 
 ### 수리모형
 
