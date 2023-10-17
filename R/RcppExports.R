@@ -5,12 +5,16 @@ reulermultinom <- function(size, rate, dt) {
     .Call(`_COVID19NorthKorea_reulermultinom`, size, rate, dt)
 }
 
-sepiar_stoch <- function(params) {
-    .Call(`_COVID19NorthKorea_sepiar_stoch`, params)
+seapird_euler <- function(params) {
+    .Call(`_COVID19NorthKorea_seapird_euler`, params)
 }
 
-sepiar_euler <- function(params) {
-    .Call(`_COVID19NorthKorea_sepiar_euler`, params)
+seapird_tauleap <- function(params) {
+    .Call(`_COVID19NorthKorea_seapird_tauleap`, params)
+}
+
+sepiar_stoch <- function(params) {
+    .Call(`_COVID19NorthKorea_sepiar_stoch`, params)
 }
 
 sepiar_erlang_stoch <- function(params) {

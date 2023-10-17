@@ -1,6 +1,6 @@
 initialize_params <- function(...) {
   params <- list() # input parameters for the model
-  params$population <- 25970000
+  params$population <- 25697000
   params$susceptible <- params$population - 1
   params$exposed <- 0
   params$asymptomatic <- 0

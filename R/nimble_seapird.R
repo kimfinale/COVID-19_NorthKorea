@@ -5,9 +5,10 @@ nimble_seapird <- nimbleFunction(
                  inf0=double(0, default=1.0),
                  day1=double(0, default=0),
                  day2=double(0),
-                 full_inc=integer(0,default=0),
-                 nobs=integer(0, default=80L)) {
+                 max_tau1=integer(0, default=60L), # this is not a step size!
+                 nobs=integer(0, default=74L)) {
 
+  # tau1 and tau2 are time points when introduction and intervention happened
   Day1 = day1 # introduction happened "Day1" days before May 12 (reported)
   Day2 = day2 # intervention "Day2" days after May 12
   epsilon = 1/2.7 # mean latent period = 1/epsilon. Jiang (2023) Chinese doi:10.3760/cma.j.cn112150-20220926-00925
@@ -17,7 +18,7 @@ nimble_seapird <- nimbleFunction(
   fA = 0.255 # fraction of asymptomatic state Yu (2022) JMW doi:10.1002/jmv.28066
   bP = 1     # relative infectiousness of pre-symptomatic state
   bA = 1     # relative infectiousness of asymptomatic state
-  cfr = 0.0304 # case fatality ratio Wang(2023) JMV doi:10.1002/jmv.28118
+  cfr = 3.04/1000 # case fatality ratio Wang(2023) JMV doi:10.1002/jmv.28118
   # obs_length = 74                  # May 14 - July 26
   obs_length = nobs
   R0 = R0 # basic reproduction number
@@ -147,16 +148,13 @@ nimble_seapird <- nimbleFunction(
     CI[day] = CIt
   }
 
-
-  inc = CI[(2+floor(day1)):ndays] - CI[(1+floor(day1)):(ndays-1)]
-  # inc0 = CI[1+floor(day1)]
-
-  if (full_inc > 1e-6) {
-    inc = CI[2:ndays] - CI[1:(ndays-1)]
-  }
-  # inc = CI[2:ndays] - CI[1:(ndays-1)]
-  # return(c(inc0, inc))
-  return(inc)
+  inc = CI[2:ndays] - CI[1:(ndays-1)]
+  N = max_tau1 + nobs
+  fullinc = rep(0, N)
+  fullinc[(N-ndays+2):N] = inc
+  # inc_before_May12 = sum(inc[1:floor(Day1)])
+  # fullinc[N-nobs] = inc_before_May12
+  return(fullinc)
   returnType(double(1))
 }
 )

@@ -5,10 +5,16 @@ update_params <- function(pars=NULL) {
   # params[["R0"]] = pars[1]
   # params[["R0_int"]] = pars[2]
 
-  params[["Day1"]] = pars[1]
-  params[["R0"]] = pars[2]
-  params[["Day2"]] = pars[3]
-  params[["R0_int"]] = pars[4]
+  if (length(pars) == 4){
+    params[["Day1"]] = pars[1]
+    params[["R0"]] = pars[2]
+    params[["Day2"]] = pars[3]
+    params[["R0_int"]] = pars[4]
+  }
+  else if (length(pars) == 2) {
+    params[["Day1"]] = pars[1]
+    params[["R0"]] = pars[2]
+  }
   # simulation times changes by Day 1 (introduction of the index case)
   fa <- params[["fA"]]
   params[["asymptomatic"]] <- params[["symptomatic"]] * (fa)/(1-fa)

@@ -55,9 +55,8 @@ sourceCpp("src/models.cpp")
 유열자수에 기반한다. 조선중앙TV는 지역별로 일별 유열자수를 보여주는 데
 반해 로동신문 자료는 그렇지 않다. 반편 조선중앙TV는 결측자료가 많아
 조선중앙TV의 지역별 일별 환자수를 모두 합해도 로동신문 자료의 일별
-유열자수 보다 적다.
-
-### 지역별 기술 분석 요약표
+유열자수 보다 적다.  
+\### 지역별 기술 분석 요약표
 
 COVID-19 북한 지역 데이터를 로드하고 분석. 북한의 COVID-19 관련 데이터를
 처리하고, 각 지역 및 전체에 대한 요약 테이블을 생성한다.
@@ -728,7 +727,7 @@ expected_inf = cases/(1-parm$fA)
 expected_inf / parm$population
 ```
 
-    ## [1] 0.246687
+    ## [1] 0.2493077
 
 예상 롱코비드 환자수 계산
 
@@ -1183,59 +1182,75 @@ ggplot(data = df_countries, aes(x = continent, y = `2022_new_cases_per_million`)
 지리적으로 북한과 가깝고 체저가 유사한 나라를 골라서 북한과 비교
 
 ``` r
-# 선택한 국가값 표시
-# "North Korea", "South Korea", "Russia", "China", "Mongolia", "Vietnam", "Cuba" 국가값을 선택
-
-df_selected <- df_countries[df_countries$location %in% c("North Korea",
-                                                         "South Korea", "Russia", 
-                                                         "China", "Mongolia", 
-                                                         "Vietnam", "Cuba"), ]
-
-ggplot(data = df_countries, aes(x = "", y = `2022_new_cases_per_million`)) +
-  geom_boxplot() +
-  geom_point(data = df_selected, aes(x = "", y = `2022_new_cases_per_million`, fill = location), color = "white", shape = 21, size = 1.5) +
-  geom_text(data = df_selected, aes(x = "", y = `2022_new_cases_per_million`, label = location, color = location),
-            vjust = 0.2, size = 3.5, nudge_x = ifelse(df_selected$location == "South Korea", 0.12, ifelse(df_selected$location %in% c("Mongolia", "China"), -0.08, 0.08)), nudge_y = -100) +
-  scale_fill_manual(values = c("North Korea" = "orange", "South Korea" = "darkblue", "Russia" = "darkgreen", "China" = "red", "Mongolia" = "skyblue", "Vietnam" = "purple", "Cuba" = "brown")) +
-  scale_color_manual(values = c("North Korea" = "orange", "South Korea" = "darkblue", "Russia" = "darkgreen", "China" = "red", "Mongolia" = "skyblue", "Vietnam" = "purple", "Cuba" = "brown")) +
-  scale_y_continuous(labels = function(x) format(x, scientific = FALSE)) +
-  theme_bw() +
-  theme(legend.position = "none") +
-  labs(title = "100만명 당 신규환자 (2022년)",
-       y = "",
-       x = "")
+# 주변 국가와의 비교 (2022)
+df_ordered <- df_countries[order(df_countries$`2022_new_cases_per_million`, decreasing=T),]
+head(df_ordered)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->
-
-북한 자료가 있는 5-7월 기간 동안 백만 명당 신규 사례에 대한 박스 플롯
-생성
+    ## # A tibble: 6 × 11
+    ##   iso_code continent     location  2020_new_cases_per_m…¹ 2021_new_cases_per_m…²
+    ##   <chr>    <chr>         <chr>                      <dbl>                  <dbl>
+    ## 1 BRN      Asia          Brunei                      350.                 34113.
+    ## 2 SPM      North America Saint Pi…                  2719.                 13934.
+    ## 3 KOR      Asia          South Ko…                  1172.                 11088.
+    ## 4 FRO      Europe        Faeroe I…                 11446.                 97163.
+    ## 5 CYP      Europe        Cyprus                    24941.                155615.
+    ## 6 AUT      Europe        Austria                   39449.                102003.
+    ## # ℹ abbreviated names: ¹​`2020_new_cases_per_million`,
+    ## #   ²​`2021_new_cases_per_million`
+    ## # ℹ 6 more variables: `2022_new_cases_per_million` <dbl>,
+    ## #   `2023_new_cases_per_million` <dbl>, `2020_new_deaths_per_million` <dbl>,
+    ## #   `2021_new_deaths_per_million` <dbl>, `2022_new_deaths_per_million` <dbl>,
+    ## #   `2023_new_deaths_per_million` <dbl>
 
 ``` r
-df_selected_NKperiod <- df_countries_NKperiod[df_countries_NKperiod$location %in% 
-                                                c("North Korea", "South Korea", 
-                                                  "Russia", "China", "Mongolia"), ]
+# Brunei: as of 2020 the country had a population of 460,345 according to the Wikipedia (https://en.wikipedia.org/wiki/Brunei)
+# Saint Pierre and Miquelona: population of 6,008 as of the March 2016 census (https://en.wikipedia.org/wiki/Saint_Pierre_and_Miquelon)
+```
 
-ggplot(data = df_countries_NKperiod, aes(x = "", y = `2022_new_cases_per_million`)) +
+지리적으로 북한과 가깝고 체저가 유사한 나라를 골라서 북한과 비교 플롯
+
+``` r
+# "North Korea", "South Korea", "Russia", "China", "Mongolia", "Vietnam", "Cuba" 국가값을 선택
+df_selected <- df_countries[df_countries$location %in% c("North Korea", "South Korea", "Russia", "China", "Mongolia", "Vietnam", "Cuba"), ]
+
+# 2022년 백만 명당 신규 케이스에 대한 박스플롯을 생성
+p1 <-ggplot(data = df_countries, aes(x = "", y = `2022_new_cases_per_million`)) +
   geom_boxplot() +
-  geom_point(data = df_selected_NKperiod, aes(x = "", y = `2022_new_cases_per_million`, fill = location), color = "white", shape = 21, size = 1.5) +
-  geom_text(data = df_selected_NKperiod, aes(x = "", y = `2022_new_cases_per_million`, label = location, color = location),
-            vjust = 0.8, size = 3.5, nudge_x = ifelse(df_selected_NKperiod$location == "Mongolia", 0.08, ifelse(df_selected_NKperiod$location %in% c("South Korea", "China"), -0.08, 0.08)), nudge_y = -100) +
-  scale_fill_manual(values = c("South Korea" = "darkblue", "Russia" = "darkgreen", "China" = "red", "Mongolia" = "skyblue","North Korea" = "orange")) +
-  scale_color_manual(values = c("South Korea" = "darkblue", "Russia" = "darkgreen", "China" = "red", "Mongolia" = "skyblue","North Korea" = "orange")) +
+  geom_point(data = df_selected, 
+             aes(x = "", y = `2022_new_cases_per_million`, 
+                 fill = location, shape = location), 
+             position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.5),
+             color = "black", size = 3) +
   scale_y_continuous(labels = function(x) format(x, scientific = FALSE)) +
+  labs(title = "2022 New Cases per Million",
+       y = "New Cases per Million",
+       x = "Global") +
   theme_bw() +
-  theme(legend.position = "none") +
-  labs(title = "100만명 당 신규환자 (2022-05-12 - 2022-08-09)",
-       y = "",
-       x = "")
+  scale_fill_manual(values = c("North Korea" = "orange", "South Korea" = "darkblue", 
+                               "Russia" = "darkgreen", "China" = "red", 
+                               "Mongolia" = "skyblue", "Vietnam" = "purple", "Cuba" = "brown")) +
+  scale_shape_manual(values = c("North Korea" = 21, "South Korea" = 22, 
+                                "Russia" = 23, "China" = 24, 
+                                "Mongolia" = 25, "Vietnam" = 20, "Cuba" = 4)) +
+  theme(legend.position = "right")
+
+p1  
 ```
 
 ![](README_files/figure-gfm/unnamed-chunk-30-1.png)<!-- -->
 
 ``` r
-df_sorted <- df_countries_NKperiod[order(df_countries_NKperiod$`2022_new_cases_per_million`, decreasing=TRUE),]
-head(df_sorted)
+# 그래프를 파일로 저장 ([그림] 주변 국가와의 비교 (2022))
+# ggsave("plots/plot_boxplot_2022period.png", plot = p1)
+```
+
+북한 자료가 있는 5-7월 기간 동안 백만 명당 신규 사례에 대한 박스 플롯
+생성
+
+``` r
+df_countries_NKperiod_ordered <- df_countries_NKperiod[order(df_countries_NKperiod$`2022_new_cases_per_million`, decreasing=T),]
+head(df_countries_NKperiod_ordered)
 ```
 
     ## # A tibble: 6 × 5
@@ -1254,4 +1269,39 @@ head(df_sorted)
 # Only two areas have higher COVID-19 incidence per 1,000,000 people: 
 # Falkland Islands and Nauru. These two islands have the population sizes of 
 # 3,662 (2021 census) and 10,084 (2021 census), respectively.
+```
+
+``` r
+# 주변 국가와의 비교 (2022-05-12 – 2022-08-09)
+df_selected_NKperiod <- df_countries_NKperiod[df_countries_NKperiod$location %in% c("North Korea", "South Korea", "Russia", "China", "Mongolia", "Vietnam", "Cuba"), ]
+
+# 북한 자료의 데이터 기간 동안의 백만 명당 신규 사례에 대한 박스 플롯 생성
+p2 <- ggplot(data = df_countries_NKperiod, aes(x = "", y = `2022_new_cases_per_million`)) +
+  geom_boxplot() +
+  geom_point(data = df_selected_NKperiod, 
+             aes(x = "", y = `2022_new_cases_per_million`, 
+                 fill = location, shape = location), 
+             position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.6),
+             color = "black", size = 3) +
+  scale_y_continuous(labels = function(x) format(x, scientific = FALSE)) +
+  labs(title = "New Cases per Million (2022-05-12 - 2022-08-09)",
+       y = "New Cases per Million",
+       x = "Global") +
+  theme_bw() +
+  scale_fill_manual(values = c("North Korea" = "orange", "South Korea" = "darkblue", 
+                               "Russia" = "darkgreen", "China" = "red", 
+                               "Mongolia" = "skyblue", "Vietnam" = "purple", "Cuba" = "brown")) +
+  scale_shape_manual(values = c("North Korea" = 21, "South Korea" = 22, 
+                                "Russia" = 23, "China" = 24, 
+                                "Mongolia" = 25, "Vietnam" = 20, "Cuba" = 4)) +
+  theme(legend.position = "right")
+
+p2
+```
+
+![](README_files/figure-gfm/unnamed-chunk-32-1.png)<!-- -->
+
+``` r
+# 그래프를 파일로 저장 ([그림] 주변 국가와의 비교 (2022-05-12 – 2022-08-09))
+# ggsave("plots/plot_boxplot_NKperiod.png", plot = p2)
 ```
