@@ -34,7 +34,7 @@ initialize_params <- function(...) {
   params$fA <- 0.255 # fraction of asymptomatic state Yu (2022) JMV doi:10.1002/jmv.28066
   params$bP <- 1 # relative infectiousness of pre-symptomatic state
   params$bA <- 1 # relative infectiousness of asymptomatic state
-  params$cfr <- 0.0304 # case fatality ratio Wang(2023) JMV doi:10.1002/jmv.28118
+  params$cfr <- 3.04/1000 # case fatality ratio Wang(2023) JMV doi:10.1002/jmv.28118
 
   params$tau <- 0.1 # time step size
   params$ndays <- 100.0 # number of days for output

@@ -14,18 +14,6 @@
 실행한다.
 
 ``` r
-# install.packages("nimble")
-# install.packages("rio")
-# install.packages("ggplot2")
-# install.packages("dplyr")
-# install.packages("data.table")
-# install.packages("Rcpp")
-# install.packages("sf")
-# install.packages("lubridate")
-# install.packages("readxl")
-# install.packages("scales")
-# install.packages("readr")
-# install.packages("gridExtra")
 library(nimble) # Bayesian MCMC related in some files in the R folder although which is not required for this particular study  
 library(rio) # data import from Excel
 library(ggplot2) # plotting
@@ -88,7 +76,7 @@ df <- do.call("rbind", caselist)
 # 시도명 (Province) | 초기 날짜 (Initial Date) | 최종 날짜 (Final Date) | 기간 (Duration) | 일일 최대 발생자 날짜 (Date of the Highest Daily New Cases) | 일일 최대 발생자 수 (Maximum Daily New Cases) | 누적 발생자 수 (Cumulative Cases) | 누적 완쾌자 수 (Cumulative Recovered Cases) | 누적 사망자 수 (Cumulative Death Cases) | 인구 수 (Population) | 발병률 (Incidence Rate)
 
 
-# 결측치가 아닌 경우 필터링
+# 결측치가 있는 행을 제거
 df <- subset(df, !is.na(case))
 
 # 지역별 요약 테이블 생성
@@ -118,9 +106,7 @@ pop$Province[pop$Province == "Kangwon"] <- "Gangwon"
 df_ds$Province_Korean = df_ds$province
 df_ds = left_join(df_ds, pop, by="Province_Korean")
 
-# Nasun City merged with Hamgyeongbuk Province, and Kaesong merged with Hwanghaebuk Province.
-# 개성 = 황해북도 https://namu.wiki/w/%EA%B0%9C%EC%84%B1%EC%8B%9C
-# 나선 = 함경북도 https://namu.wiki/w/%EB%9D%BC%EC%84%A0%EC%8B%9C?from=%EB%82%98%EC%84%A0%EC%8B%9C
+# Rasonn City merged with Hamgyeongbuk-do Province, and Kaesong merged with Hwanghaebuk-do Province.
 
 # 지역 데이터 병합
 df_ds[df_ds$province == "황북","adding_new_cases"] = df_ds[df_ds$province == "황북","adding_new_cases"] +  df_ds[df_ds$province == "개성","adding_new_cases"] 
@@ -304,6 +290,25 @@ p2_kr
 ``` r
 # 그래프를 파일로 저장 ([그림] 두 자료원의 신규 유열자 추이 비교)
 # ggsave("plots/plot_dates2_kr.png", plot = p2_kr, width = 6.5, height = 4.5, dpi = 300)
+
+# 두 자료원 트렌드 한 그래프에 나타내기
+p2_eng <- ggplot(df_long, aes(x = 기준일, y = case)) +
+  geom_col(data = subset(df_long, source == "신규 유열자(노동신문)"), aes(fill = source), alpha = 0.3) +
+  geom_col(data = subset(df_long, source == "신규 유열자(조선중앙TV)"), aes(fill = source), alpha = 0.5) +
+  scale_fill_manual(values = c("blue", "brown"), labels = c("Labor Daily", "Chosun Joongang TV"), name = "Data Source") +
+  theme_bw() +
+  labs(x = "", y = "Fever cases") +
+  scale_y_continuous(labels = scales::comma) +
+  theme(
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    legend.title = element_blank(),
+    legend.position = c(0.75, 0.85),
+    text = element_text(size=16),
+    axis.text = element_text(size=13),
+    legend.text=element_text(size=13)
+  )
+
+# ggsave(paste0("plots/daily_fever_eng_", tstamp(), ".png"), p, width=3.4*2, height=2.7*2)
 ```
 
 ### 월별 유열자수 지도에 표기
@@ -364,7 +369,7 @@ library(RColorBrewer)
 plt_May <- ggplot(dprk) +
   geom_sf(aes(fill=cases_May)) +
   geom_text(data = labels, aes(x=lon, y=lat, label=name), size=4, color="#505050")+
-  scale_fill_gradientn(colors=brewer.pal(9, "YlOrBr"), name="유열자수")+
+  scale_fill_gradientn(colors=brewer.pal(9, "YlOrBr"), name="유열자수",                       limits=c(0,max(dprk$cases_May)))+
   coord_sf()+
   theme_map(legend_position = c(0.96, 0.3)) +
   theme(legend.title = element_text(size=12),
@@ -381,7 +386,8 @@ plt_May
 plt_June <- ggplot(dprk) +
   geom_sf(aes(fill=cases_June)) +
   geom_text(data = labels, aes(x=lon, y=lat, label=name), size=4, color="#505050")+
-  scale_fill_gradientn(colors=brewer.pal(9, "YlOrBr"), name="유열자수")+
+  scale_fill_gradientn(colors=brewer.pal(9, "YlOrBr"), name="유열자수",
+                       limits=c(0,max(dprk$cases_May)))+
   coord_sf()+
   theme_map(legend_position = c(0.96, 0.3)) +
   theme(legend.title = element_text(size=12),
@@ -398,7 +404,8 @@ plt_June
 plt_July <- ggplot(dprk) +
   geom_sf(aes(fill=cases_July)) +
   geom_text(data = labels, aes(x=lon, y=lat, label=name), size=4, color="#505050")+
-  scale_fill_gradientn(colors=brewer.pal(9, "YlOrBr"), name="유열자수")+
+  scale_fill_gradientn(colors=brewer.pal(9, "YlOrBr"), name="유열자수",
+                       limits=c(0,max(dprk$cases_May)))+
   coord_sf()+
   theme_map(legend_position = c(0.96, 0.3)) +
   theme(legend.title = element_text(size=12),
@@ -441,12 +448,17 @@ df <- do.call("rbind", caselist)
 p <- ggplot(df, aes(date, case))+
   geom_col(fill="brown", alpha=0.5)+
   theme_bw() +
-  labs(x="", y="Symptomatic case") +
+  # labs(x="", y="Symptomatic case") +
+   labs(x="", y="일별 유열자 수") +
   facet_wrap(~province, scales = "free_y",)
 p
 ```
 
 ![](README_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
+``` r
+# ggsave(paste0("plots/daily_fever_region_", tstamp(), ".png"), p, width=3.4*3, height=2.7*3)
+```
 
 시기별 (월별), 지역별 기술 분석을 위해 자료 변형
 
@@ -592,11 +604,12 @@ dprk$pop_density = NA
 for (n in dprk$NAME_1){
   dprk[dprk$NAME_1 == n,]$pop_density = area_df[area_df$province_eng  == n,]$pop_den
 }
+dprk$log_pop_density = log(dprk$pop_density)
 
 library(RColorBrewer)
 p <- ggplot(dprk) +
   geom_sf(aes(fill=pop_density)) +
-  scale_fill_gradientn(colors=brewer.pal(9, "YlOrBr"), name="Population density \n(per sq. km)")+
+  scale_fill_gradientn(trans="log10", colors=brewer.pal(9, "YlOrBr"), name="Population density \n(per sq. km)")+
   coord_sf()+
   theme_map(legend_position = c(0.96, 0.3)) +
   theme(legend.title = element_text(size=12),
@@ -608,6 +621,78 @@ p
 
 ``` r
 # Grey color indicates the areas of no information 
+# ggsave(paste0("plots/popden_", tstamp(), ".png"), p, width=3.4*2, height=2.7*2)
+```
+
+### 발병율과 인구 밀도 상관관계 분석
+
+``` r
+df <- left_join(df_prov, area_df, by="province")
+df$log_pop_den <- log(df$pop_den)
+cor.test(df$pop_den, df$attack_rate)
+```
+
+    ## 
+    ##  Pearson's product-moment correlation
+    ## 
+    ## data:  df$pop_den and df$attack_rate
+    ## t = 1.8582, df = 8, p-value = 0.1002
+    ## alternative hypothesis: true correlation is not equal to 0
+    ## 95 percent confidence interval:
+    ##  -0.1231105  0.8758947
+    ## sample estimates:
+    ##       cor 
+    ## 0.5490767
+
+``` r
+cor.test(df$log_pop_den, df$attack_rate)
+```
+
+    ## 
+    ##  Pearson's product-moment correlation
+    ## 
+    ## data:  df$log_pop_den and df$attack_rate
+    ## t = 1.2889, df = 8, p-value = 0.2335
+    ## alternative hypothesis: true correlation is not equal to 0
+    ## 95 percent confidence interval:
+    ##  -0.2909136  0.8280905
+    ## sample estimates:
+    ##       cor 
+    ## 0.4146658
+
+``` r
+library(ggplot2)
+p <- ggplot(df,aes(pop_den, attack_rate)) +
+  geom_point()+
+  geom_smooth(method="lm", level=0.95) +
+  labs(x="Population density (per sq. km)", y="Attack rate (%)") +
+  theme_bw() +
+  theme(legend.title = element_blank(),
+        legend.position = "bottom",
+        text = element_text(size=16),
+        axis.text = element_text(size=13),
+        legend.text=element_text(size=13))
+p
+```
+
+![](README_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
+
+``` r
+# ggsave(paste0("plots/ar_popden_", tstamp(), ".png"), p, width=3.4*2, height=2.7*2)
+
+# library(ggplot2)
+# p <- ggplot(df,aes(log_pop_den, attack_rate)) +
+#   geom_point()+
+#   geom_smooth(method="lm", level=0.95) +
+#   labs(x="Population density (per sq. km)", y="Attack rate (%)") +
+#   theme_bw() +
+#   theme(legend.title = element_blank(),
+#         legend.position = "bottom",
+#         text = element_text(size=16),
+#         axis.text = element_text(size=13),
+#         legend.text=element_text(size=13))
+# p
+# ggsave(paste0("plots/ar_logpopden_", tstamp(), ".png"), p, width=3.4*2, height=2.7*2)
 ```
 
 ### 사망자수 및 치명률 (case fatality ratio)
@@ -662,7 +747,7 @@ p <- grid.arrange(
   bottom = "Expected death")
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
 
 ``` r
 p
@@ -672,7 +757,7 @@ p
     ##   z     cells    name                grob
     ## 1 1 (1-1,1-1) arrange      gtable[layout]
     ## 2 2 (1-1,2-2) arrange      gtable[layout]
-    ## 3 3 (2-2,1-2) arrange text[GRID.text.889]
+    ## 3 3 (2-2,1-2) arrange text[GRID.text.936]
 
 ### 중환자수
 
@@ -703,7 +788,7 @@ p <- ggplot(df) +
 p
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
 
 ### 무증상수를 감안한 예상 감염자수 및 롱코비드 예상 환자
 
@@ -790,7 +875,7 @@ p <- ggplot(mod1, aes(x=date)) +
 p
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-21-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
 
 일별 유열자 및 감염자
 
@@ -829,7 +914,7 @@ p <- ggplot(mod1, aes(x=date)) +
 p
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-23-1.png)<!-- -->
 
 ### 확률론적 모형
 
@@ -866,7 +951,7 @@ for (i in 2:nrun) {
 # ids <- colSums(m) > min_case
 # m <- m[,ids] # select only those at least one infection has been generated
 # sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.025,0.5,0.975))))
-probs = c(0.05,0.5,0.95)
+probs = c(0.025,0.5,0.975)
 sim = as.data.frame(t(apply(m, 1, quantile, probs=probs)))
 # sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.25,0.5,0.75))))
 # colSums(sim)
@@ -884,11 +969,11 @@ br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
 gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
 
 p <- ggplot(mod1, aes(x=date)) +
-  geom_ribbon(aes(ymax=upper,ymin=lower, fill="95% CrI"))+
+  geom_ribbon(aes(ymax=upper,ymin=lower, fill="95% interval"))+
   geom_col(data=dat1, aes(x=date, y=obs, fill="Data"),
            inherit.aes = F) +
   geom_line(aes(y=med, color="50%"), linewidth=1.5) +
-  scale_fill_manual("", values=c("95% CrI"=sb[1], "Data"=br))+
+  scale_fill_manual("", values=c("95% interval"=sb[1], "Data"=br))+
   scale_color_manual("", values=c("50%"=sb[3]))+
   labs(x="", y="Daily symptomatic case") +
   scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d",
@@ -899,7 +984,11 @@ p <- ggplot(mod1, aes(x=date)) +
 p
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-23-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
+
+``` r
+# ggsave(paste0("plots/stoch_fever_inc_", tstamp(), ".png"), p, width=3.4*2, height=2.7*2)
+```
 
 유열자 및 감염자
 
@@ -935,7 +1024,7 @@ for (i in 2:nrun) {
 # min_case = 10000
 # ids <- colSums(m) > min_case
 # m <- m[,ids] # select only those at least one infection has been generated
-probs = c(0.05,0.5,0.95)
+probs = c(0.025,0.5,0.975)
 sim1 = as.data.frame(t(apply(m1, 1, quantile, probs=probs)))
 sim2 = as.data.frame(t(apply(m2, 1, quantile, probs=probs)))
 # sim = as.data.frame(t(apply(m, 1, quantile, probs=c(0.25,0.5,0.75))))
@@ -954,14 +1043,14 @@ br <- scales::alpha(c("brown"), alpha = c(0.5)) # data
 gr <- scales::alpha(c("darkgreen"), alpha = c(0.5, 0.55, 0.9)) # infection
 
 p <- ggplot(mod, aes(x=date)) +
-  geom_ribbon(aes(ymax=upper, ymin=lower, fill="Infected (95% CrI)"))+
-  geom_ribbon(aes(ymax=upper_symp, ymin=lower_symp, fill="Symptomatic (95% CrI)"))+
+  geom_ribbon(aes(ymax=upper, ymin=lower, fill="Infected (95% interval)"))+
+  geom_ribbon(aes(ymax=upper_symp, ymin=lower_symp, fill="Symptomatic (95% interval)"))+
   geom_col(data=dat, aes(x=date, y=obs, fill="Data"),
            inherit.aes = F) +
   geom_line(aes(y=med, color="Infected (50%)"), linewidth=1.5) +
   geom_line(aes(y=med_symp, color="Symptomatic (50%)"), linewidth=1.5) +
-  scale_fill_manual("", values=c("Symptomatic (95% CrI)"=sb[1],
-                                 "Infected (95% CrI)"=gr[1],
+  scale_fill_manual("", values=c("Symptomatic (95% interval)"=sb[1],
+                                 "Infected (95% interval)"=gr[1],
                                  "Data"=br))+
   scale_color_manual("", values=c("Infected (50%)"=gr[3], "Symptomatic (50%)"=sb[3]))+
   labs(x="", y="Daily symptomatic case") +
@@ -969,11 +1058,15 @@ p <- ggplot(mod, aes(x=date)) +
                limits=c(min(mod$date), max(dat$date)))+
   theme_bw()+
   theme(axis.text.x=element_text(angle=60, hjust=1))+
-  theme(legend.position=c(0.8,0.5))
+  theme(legend.position=c(0.7,0.5))
 p
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->
+
+``` r
+# ggsave(paste0("plots/stoch_infection_fever_inc_", tstamp(), ".png"), p, width=3.4*2, height=2.7*2)
+```
 
 ### COVID-19관련 세계 및 북한 데이터를 시각화
 
@@ -1163,7 +1256,7 @@ ggplot(data = df_countries, aes(x = "", y = `2022_new_cases_per_million`)) +
        x = "전세계")
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-28-1.png)<!-- -->
 
 대륙별
 
@@ -1177,7 +1270,7 @@ ggplot(data = df_countries, aes(x = continent, y = `2022_new_cases_per_million`)
        x = "")
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-28-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->
 
 지리적으로 북한과 가깝고 체저가 유사한 나라를 골라서 북한과 비교
 
@@ -1238,7 +1331,7 @@ p1 <-ggplot(data = df_countries, aes(x = "", y = `2022_new_cases_per_million`)) 
 p1  
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-30-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-31-1.png)<!-- -->
 
 ``` r
 # 그래프를 파일로 저장 ([그림] 주변 국가와의 비교 (2022))
@@ -1299,9 +1392,246 @@ p2 <- ggplot(data = df_countries_NKperiod, aes(x = "", y = `2022_new_cases_per_m
 p2
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-32-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-33-1.png)<!-- -->
 
 ``` r
 # 그래프를 파일로 저장 ([그림] 주변 국가와의 비교 (2022-05-12 – 2022-08-09))
 # ggsave("plots/plot_boxplot_NKperiod.png", plot = p2)
 ```
+
+### 5월 13일 이전 유열자 반영
+
+``` r
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+max_tau1 = 40
+
+code_cp_full_NB <- nimbleCode({ 
+    R0 ~ T(dnorm(7, sd = 2), 1, 30)
+    R_int ~ T(dnorm(1, sd = 2), 0, 10)
+    day1 ~ T(dnorm(20, sd = 10), 7, max_tau1)
+    day2 ~ T(dnorm(2, sd = 2), -5, 5)
+    size ~ T(dnorm(1, sd = 20), 1e-3, 1e3)
+    
+    mu[1:N] <- nimble_seapird(R0 = R0, 
+                               R_int = R_int,
+                               pop = pop,
+                               inf0 = inf0,
+                               report_ratio = 1.0,
+                               day1 = day1,
+                               day2 = day2,
+                               max_tau1 = max_tau1,
+                               nobs = nobs)
+    for (i in 1:n) {
+      y[i] ~ dnegbin(size/(size+mu[(N-nobs+i)]), size) #
+    }
+    # Also use the observation before May 13
+    case_before ~ dnegbin(size/(size+sum(mu[1:(N-nobs)])), size)
+    
+    for (i in 1:N) {
+      ypred[i] ~ dnegbin(size/(size+mu[i]), size) # posterior predictive
+    }
+})
+
+
+max_tau1 = 40
+nobs = 74
+dend = nobs
+inf0 = 1
+y = d$symptomatic[1:nobs]
+
+case_before <- d$cumul_symptomatic[1] + d$cumul_deaths[1] - d$symptomatic[1] 
+
+PARAMETERS <- initialize_params(tau=0.1, obs_length=length(y))
+
+const <- list(N=length(y)+max_tau1, 
+              n=dend, 
+              pop=PARAMETERS$population, 
+              nobs=nobs,
+              max_tau1=max_tau1,
+              inf0=inf0)
+
+data <- list(y=y, case_before=case_before)
+
+inits <- list(R0=6,
+              R_int=0.6,
+              day1=14,
+              day2=2)  
+
+## create the model object
+model <- nimbleModel(code = code_cp_full_NB,
+                     constants = const,
+                     data = data,
+                     inits = inits,
+                     check = FALSE)
+  
+Cmodel <- compileNimble(model)
+
+mcmc <- buildMCMC(model, monitors=c(parm_monitor, 'ypred'))
+Cmcmc <- compileNimble(mcmc, project=Cmodel)
+
+set.seed(42)
+samples <- runMCMC(Cmcmc, niter=1e5, nchains=1, thin=10)
+```
+
+``` r
+d = readRDS("inst/extdata/covid_overall_20230122.rds")
+max_tau1 = 40
+nobs = 74
+
+samples = readRDS("outputs/samples_cp_full_nb_45_20231024T10.rds")
+y = d$symptomatic[1:74]
+PARAMETERS <- initialize_params(tau=0.1, obs_length=length(y))
+
+# convergence diagnostic
+library(coda)
+x1 = as.data.frame(samples[[1]])["R0"]
+x2 = as.data.frame(samples[[2]])["R0"]
+x3 = as.data.frame(samples[[3]])["R0"]
+x4 = as.data.frame(samples[[4]])["R0"]
+x = mcmc.list(as.mcmc(x1),as.mcmc(x2),as.mcmc(x3),as.mcmc(x4))
+
+gelman.diag(x)
+```
+
+    ## Potential scale reduction factors:
+    ## 
+    ##    Point est. Upper C.I.
+    ## R0          1       1.01
+
+``` r
+# use the first chain
+chain = as.data.frame(samples[[1]])
+
+ypreds = chain[, grepl("ypred", names(chain))]
+
+# reduce sample size for easier analysis
+nsamp = 1000
+set.seed(2)
+ypreds = ypreds[sample(1:nrow(ypreds), nsamp), ]        
+dim(ypreds)
+```
+
+    ## [1] 1000  114
+
+``` r
+probs = c(0.025,0.25,0.5,0.75,0.975)
+summ = apply(ypreds, 2, quantile, probs=probs, na.rm=T)
+
+# total fever
+tot_ypreds <- rowSums(ypreds)
+quantile(tot_ypreds, probs=probs)
+```
+
+    ##    2.5%     25%     50%     75%   97.5% 
+    ## 4610582 4841185 4953123 5080164 5312919
+
+``` r
+# case_before May 13
+last_day_sim = as.Date("2023-05-13") + length(y) - 1
+date = rev(seq(from=last_day_sim, by="-1 day", length.out=ncol(ypreds)))
+n = sum(date < as.Date("2023-05-13")) # days before May 13
+quantile(rowSums(ypreds[,1:n]), probs=probs)
+```
+
+    ##     2.5%      25%      50%      75%    97.5% 
+    ## 194168.1 227337.2 246106.0 269246.2 312931.4
+
+``` r
+# infections
+inf = ypreds / (1-PARAMETERS$fA)
+quantile(rowSums(inf), probs=probs)
+```
+
+    ##    2.5%     25%     50%     75%   97.5% 
+    ## 6188701 6498235 6648487 6819012 7131434
+
+``` r
+# deaths
+deaths = ypreds * PARAMETERS$cfr
+quantile(rowSums(deaths), probs=probs)
+```
+
+    ##     2.5%      25%      50%      75%    97.5% 
+    ## 14016.17 14717.20 15057.49 15443.70 16151.27
+
+``` r
+dat = data.frame(
+  # date = seq(to=as.Date("2022-05-13"), by="day", length.out=nrow(ypreds)),
+  date = rev(seq(from=last_day_sim, by="-1 day", length.out=ncol(ypreds))),
+  obs = c(rep(NA, max_tau1), y),
+  lb = summ[1, ], 
+  med = summ[3,],
+  ub = summ[5, ])
+
+sb <- scales::alpha(c("steelblue"), alpha = c(0.6, 0.55, 1.0)) # symptomatic
+br <- scales::alpha(c("brown"), alpha = c(0.6)) # data
+gr <- scales::alpha(c("darkgreen"), alpha = c(0.2, 0.55, 0.9)) # infection
+
+library(ggplot2)
+p <- ggplot(dat, aes(x=date)) +
+  geom_ribbon(aes(ymax=ub,ymin=lb, fill="95% PPI"))+
+  geom_line(aes(y=med, color="Median"), linewidth=1) +
+  geom_col(aes(y=obs, fill="Data")) +
+  scale_fill_manual("", values=c("95% PPI"=sb[1], 
+                                 "Data"=br))+
+  scale_color_manual("", values=c("Median"=sb[3]))+
+  labs(x="", y="Daily symptomatic case") +
+  scale_x_date(date_breaks="2 weeks", date_labels="%Y-%m-%d")+
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE))+
+  theme_bw()+
+  theme(axis.text.x=element_text(size=13, angle=60, hjust=1), 
+        text = element_text(size=16),
+        axis.text = element_text(size=13),
+        legend.text = element_text(size=13), 
+        legend.position=c(0.85,0.8))
+  
+p
+```
+
+![](README_files/figure-gfm/unnamed-chunk-35-1.png)<!-- -->
+
+``` r
+# ggsave(paste0("plots/cp_full_nb_rr_ppi_", dend, "_", tstamp(hour=T), ".png"), p, width=3.4*2.6, height=2.7*2.6)
+```
+
+모수 추정치
+
+``` r
+parm_monitor <- c('R0','R_int',"day1",'day2')
+
+chain = chain[sample(1:nrow(chain), nsamp), ]   
+
+for (par in parm_monitor) {
+  theta = chain[, par]
+  print(quantile(theta, probs=probs))
+}
+```
+
+    ##     2.5%      25%      50%      75%    97.5% 
+    ## 5.476217 6.102392 6.459084 6.863057 7.561511 
+    ##      2.5%       25%       50%       75%     97.5% 
+    ## 0.6409593 0.6529373 0.6586952 0.6658178 0.6780708 
+    ##     2.5%      25%      50%      75%    97.5% 
+    ## 29.02447 31.57239 33.14212 34.84710 38.37869 
+    ##     2.5%      25%      50%      75%    97.5% 
+    ## 3.335717 3.634818 3.794139 3.980971 4.374147
+
+``` r
+# date of introduction
+theta = chain[, "day1"]
+qnt = quantile(theta , probs=probs)
+as.Date("2023-05-13") - round(qnt[c(5,3,1)])
+```
+
+    ##        97.5%          50%         2.5% 
+    ## "2023-04-05" "2023-04-10" "2023-04-14"
+
+``` r
+# date of intervention
+theta = chain[, "day2"]
+qnt = quantile(theta , probs=probs)
+as.Date("2023-05-13") + round(qnt[c(1,3,5)])
+```
+
+    ##         2.5%          50%        97.5% 
+    ## "2023-05-16" "2023-05-17" "2023-05-17"

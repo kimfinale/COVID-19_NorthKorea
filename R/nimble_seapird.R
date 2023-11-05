@@ -3,14 +3,17 @@ nimble_seapird <- nimbleFunction(
                  R_int=double(0),
                  pop=double(0),
                  inf0=double(0, default=1.0),
+                 report_ratio=double(0, default=1.0),
                  day1=double(0, default=0),
                  day2=double(0),
                  max_tau1=integer(0, default=60L), # this is not a step size!
                  nobs=integer(0, default=74L)) {
 
   # tau1 and tau2 are time points when introduction and intervention happened
+
   Day1 = day1 # introduction happened "Day1" days before May 12 (reported)
   Day2 = day2 # intervention "Day2" days after May 12
+  report_ratio = report_ratio # to account for underreporting
   epsilon = 1/2.7 # mean latent period = 1/epsilon. Jiang (2023) Chinese doi:10.3760/cma.j.cn112150-20220926-00925
   delta = 1/3.4 # mean incubation period = 1/delta. Wu (2022) JAMA Network Open doi:10.1001/jamanetworkopen.2022.28008
   gamma = 1/5 # mean infectious period = 1/gamma. Takahashi (2022) EID doi:10.3201/eid2805.220197
@@ -31,7 +34,8 @@ nimble_seapird <- nimbleFunction(
   beta = R0 / dur_infect # // 'dur_infect' multiplied by beta gives R0
   ndays = floor(Day1) + obs_length + 1
   # day of intervention is counted by days from introduction
-  day_intervention = floor(Day1) + Day2
+  # day_intervention = floor(Day1) + Day2
+  day_intervention = Day1 + Day2
   # // Calculate the number of events for each step, update state vectors
   S = rep(0, ndays)
   E = rep(0, ndays)
@@ -87,7 +91,7 @@ nimble_seapird <- nimbleFunction(
     It = It + dI
     Rt = Rt + dR
     Dt = Dt + dD
-    CIt = CIt + new_symptoms # cumulative symptomatic
+    CIt = CIt + report_ratio * new_symptoms # cumulative symptomatic after accounting for the reporting ratio
   }
 ## -----------------------------------------------------------------
   S[1] = St
@@ -100,7 +104,8 @@ nimble_seapird <- nimbleFunction(
   CI[1] = CIt
 
   stepsperday = ceiling(1/tau)
-  telapsed = 0
+  # telapsed = 0
+  telapsed = time_before_day1
 
   for (day in 2:ndays) {
     for(step in 1:stepsperday) {# // Essentially Euler method was implemented
@@ -135,7 +140,7 @@ nimble_seapird <- nimbleFunction(
       It = It + dI
       Rt = Rt + dR
       Dt = Dt + dD
-      CIt = CIt + new_symptoms # cumulative symptomatic
+      CIt = CIt + report_ratio * new_symptoms # cumulative symptomatic
     }
 
     S[day] = St
@@ -152,8 +157,7 @@ nimble_seapird <- nimbleFunction(
   N = max_tau1 + nobs
   fullinc = rep(0, N)
   fullinc[(N-ndays+2):N] = inc
-  # inc_before_May12 = sum(inc[1:floor(Day1)])
-  # fullinc[N-nobs] = inc_before_May12
+
   return(fullinc)
   returnType(double(1))
 }
