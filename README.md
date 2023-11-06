@@ -43,8 +43,9 @@ sourceCpp("src/models.cpp")
 유열자수에 기반한다. 조선중앙TV는 지역별로 일별 유열자수를 보여주는 데
 반해 로동신문 자료는 그렇지 않다. 반편 조선중앙TV는 결측자료가 많아
 조선중앙TV의 지역별 일별 환자수를 모두 합해도 로동신문 자료의 일별
-유열자수 보다 적다.  
-\### 지역별 기술 분석 요약표
+유열자수 보다 적다.
+
+### 지역별 기술 분석 요약표
 
 COVID-19 북한 지역 데이터를 로드하고 분석. 북한의 COVID-19 관련 데이터를
 처리하고, 각 지역 및 전체에 대한 요약 테이블을 생성한다.
@@ -144,7 +145,7 @@ summary_table_kr <- summary_table[, c("province", "initial_date", "final_date",
 # 한글로 된 요약 테이블을 CSV 파일로 저장 (<표> 지역별 발병률)
 summary_table_kr <- summary_table_kr[order(summary_table_kr$province), ]
 
-write.csv(summary_table_kr, file = "outputs/summary_table_kr.csv", row.names = FALSE)
+# write.csv(summary_table_kr, file = "outputs/summary_table_kr.csv", row.names = FALSE)
 
 df_cases_all <- df %>%
   summarize(
